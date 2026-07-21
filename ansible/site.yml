@@ -1,0 +1,22 @@
+---
+- name: Configure private Oracle Linux 8 server through OCI Bastion
+  hosts: oracle_linux
+  become: true
+  gather_facts: true
+  pre_tasks:
+    - name: Show deployment target and planned configuration
+      ansible.builtin.debug:
+        msg:
+          - "Inventory host: {{ inventory_hostname }}"
+          - "Target address: {{ ansible_host }}"
+          - "Remote user: {{ ansible_user }}"
+          - "Operating system: {{ ansible_distribution }} {{ ansible_distribution_version }}"
+          - "Python interpreter: {{ ansible_python.executable }}"
+          - "Actions: optionally patch installed OS packages, install Python 3.12, OCI CLI, Git, Firefox, a minimal GNOME/VNC desktop and Instant Client, configure /home/oracle/.oci, download the Autonomous Database wallet, test the ADMIN high-service connection, clone the application repository"
+
+    - name: Wait for the managed SSH path
+      ansible.builtin.wait_for_connection:
+        timeout: 600
+        sleep: 5
+  roles:
+    - oracle_client

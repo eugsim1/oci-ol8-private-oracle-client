@@ -1,0 +1,136 @@
+---
+- name: Show graphical desktop settings excluding secrets
+  ansible.builtin.debug:
+    msg:
+      - "Graphical interface enabled: {{ oracle_gui_enabled | bool }}"
+      - "Desktop environment: minimal package selection from {{ oracle_gui_desktop_environment }}"
+      - "Desktop user: oracle"
+      - "VNC display: :{{ oracle_gui_vnc_display }}"
+      - "VNC loopback port: 127.0.0.1:{{ oracle_gui_vnc_port }}"
+      - "VNC geometry: {{ oracle_gui_vnc_geometry }}"
+      - "VNC password supplied: {{ (oracle_gui_vnc_password | length) >= 6 }}"
+      - "Firefox requested: {{ 'firefox' in oracle_gui_packages }}"
+- name: Validate graphical desktop settings
+  ansible.builtin.assert:
+    that:
+      - oracle_gui_vnc_display | int >= 1
+      - oracle_gui_vnc_display | int <= 99
+      - oracle_gui_vnc_geometry is match('^[0-9]+x[0-9]+$')
+      - oracle_gui_vnc_password | length >= 6
+    fail_msg: >-
+      The GUI requires display 1-99, geometry such as 1280x800, and an
+      ORACLE_VNC_PASSWORD of at least 6 characters. TigerVNC authentication
+      uses only the first 8 password characters.
+- name: Install minimal supported GNOME graphical environment
+  ansible.builtin.dnf:
+    name: "{{ oracle_gui_desktop_environment }}"
+    state: present
+    install_weak_deps: false
+    update_cache: true
+- name: Install Firefox and TigerVNC packages
+  ansible.builtin.dnf:
+    name: "{{ oracle_gui_packages }}"
+    state: latest
+    install_weak_deps: false
+    update_cache: true
+- name: Create oracle VNC configuration directory
+  ansible.builtin.file:
+    path: /home/oracle/.vnc
+    state: directory
+    owner: oracle
+    group: oracle
+    mode: "0700"
+- name: Configure oracle VNC password
+  ansible.builtin.shell: /usr/bin/vncpasswd -f > /home/oracle/.vnc/passwd
+  args:
+    executable: /bin/bash
+    stdin: "{{ oracle_gui_vnc_password }}\n"
+    creates: /home/oracle/.vnc/passwd
+  become: true
+  become_user: oracle
+  no_log: true
+- name: Protect oracle VNC password file
+  ansible.builtin.file:
+    path: /home/oracle/.vnc/passwd
+    state: file
+    owner: oracle
+    group: oracle
+    mode: "0600"
+- name: Map VNC display to oracle user
+  ansible.builtin.lineinfile:
+    path: /etc/tigervnc/vncserver.users
+    regexp: '^:{{ oracle_gui_vnc_display }}='
+    line: ':{{ oracle_gui_vnc_display }}=oracle'
+    create: true
+    owner: root
+    group: root
+    mode: "0644"
+- name: Configure GNOME VNC session
+  ansible.builtin.lineinfile:
+    path: /etc/tigervnc/vncserver-config-defaults
+    regexp: '^session='
+    line: 'session=gnome'
+    create: true
+    owner: root
+    group: root
+    mode: "0644"
+- name: Configure VNC desktop geometry
+  ansible.builtin.lineinfile:
+    path: /etc/tigervnc/vncserver-config-defaults
+    regexp: '^geometry='
+    line: 'geometry={{ oracle_gui_vnc_geometry }}'
+    create: true
+    owner: root
+    group: root
+    mode: "0644"
+- name: Force VNC to localhost with password authentication
+  ansible.builtin.copy:
+    content: |
+      # Managed by Ansible. Reach this VNC session only through an SSH tunnel.
+      localhost
+      securitytypes=vncauth
+    dest: /etc/tigervnc/vncserver-config-mandatory
+    owner: root
+    group: root
+    mode: "0644"
+- name: Restore SELinux context on oracle VNC files
+  ansible.builtin.command: restorecon -RF /home/oracle/.vnc
+  changed_when: false
+- name: Enable and start oracle graphical VNC session
+  ansible.builtin.systemd:
+    name: "vncserver@:{{ oracle_gui_vnc_display }}.service"
+    enabled: true
+    state: started
+    daemon_reload: true
+- name: Wait for local-only oracle VNC listener
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: "{{ oracle_gui_vnc_port }}"
+    timeout: 120
+- name: Verify Firefox installation as oracle
+  ansible.builtin.command: /usr/bin/firefox --version
+  become: true
+  become_user: oracle
+  environment:
+    HOME: /home/oracle
+  changed_when: false
+  register: oracle_gui_firefox_version
+- name: Verify graphical session runs as oracle
+  ansible.builtin.shell: >-
+    set -o pipefail &&
+    ps -eo user=,pid=,args= |
+    awk '$1 == "oracle" && ($0 ~ /Xvnc/ || $0 ~ /gnome-session/) { print }' |
+    head -n 10
+  args:
+    executable: /bin/bash
+  changed_when: false
+  register: oracle_gui_processes
+  failed_when: oracle_gui_processes.stdout | length == 0
+- name: Print graphical desktop verification
+  ansible.builtin.debug:
+    msg:
+      - "Desktop session owner: oracle"
+      - "VNC service: vncserver@:{{ oracle_gui_vnc_display }}.service"
+      - "VNC endpoint: 127.0.0.1:{{ oracle_gui_vnc_port }} (SSH tunnel required)"
+      - "Firefox: {{ oracle_gui_firefox_version.stdout }}"
+      - "Graphical processes: {{ oracle_gui_processes.stdout_lines }}"

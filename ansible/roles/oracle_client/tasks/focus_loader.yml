@@ -1,0 +1,259 @@
+---
+- name: Show final FOCUS loader settings excluding secrets
+  ansible.builtin.debug:
+    msg:
+      - "Repository: {{ oracle_application_repository_destination }}"
+      - "Wallet/TNS_ADMIN: {{ oracle_adb_wallet_directory }}"
+      - "Configured TNS alias: {{ oracle_focus_loader_db_tns_alias | default('auto-discover', true) }}"
+      - "Target schema: {{ oracle_focus_loader_target_schema }}"
+      - "Namespace: {{ oracle_focus_loader_namespace }}"
+      - "Minimum date: {{ oracle_focus_loader_minimum_date }}"
+      - "Workers: {{ oracle_focus_loader_workers }}"
+      - "Drop existing schema: {{ oracle_focus_loader_drop_existing | bool }}"
+      - "Loader authentication: {{ 'OCI Vault secret' if oracle_focus_loader_db_secret_id | length > 0 else 'protected password' }}"
+
+- name: Validate FOCUS loader prerequisites and protected settings
+  ansible.builtin.assert:
+    that:
+      - oracle_application_repository_enabled | bool
+      - oracle_adb_wallet_enabled | bool
+      - oracle_focus_loader_db_admin_password | length > 0
+      - oracle_focus_loader_target_schema_password | length > 0
+      - (oracle_focus_loader_db_secret_id | length > 0) or (oracle_focus_loader_db_password | length > 0)
+      - oracle_focus_loader_target_schema is match('^[A-Za-z][A-Za-z0-9_$#]*$')
+      - oracle_focus_loader_minimum_date is match('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+      - oracle_focus_loader_workers | int > 0
+    fail_msg: >-
+      The final FOCUS loader stage requires the cloned repository, Autonomous
+      Database wallet, ADMIN and target-schema passwords, a valid schema/date,
+      and either a loader password or OCI Vault secret OCID.
+  no_log: true
+
+- name: Install CGO compiler for the FOCUS loader build
+  ansible.builtin.dnf:
+    name: "{{ oracle_focus_loader_build_packages }}"
+    state: latest
+    update_cache: true
+
+- name: Discover first high Autonomous Database service alias
+  ansible.builtin.shell: >-
+    awk '
+      /^[[:space:]]*[A-Za-z0-9_.-]+_high[[:space:]]*=/ {
+        alias=$1; sub(/[[:space:]]*=.*/, "", alias); print alias; exit
+      }
+    ' "{{ oracle_adb_wallet_directory }}/tnsnames.ora"
+  args:
+    executable: /bin/bash
+  become: true
+  become_user: oracle
+  changed_when: false
+  register: oracle_focus_loader_discovered_tns_alias
+
+- name: Select configured or discovered high TNS alias
+  ansible.builtin.set_fact:
+    oracle_focus_loader_effective_tns_alias: >-
+      {{ oracle_focus_loader_db_tns_alias
+         if oracle_focus_loader_db_tns_alias | trim | length > 0
+         else oracle_focus_loader_discovered_tns_alias.stdout | trim }}
+
+- name: Require an Autonomous Database high TNS alias
+  ansible.builtin.assert:
+    that:
+      - oracle_focus_loader_effective_tns_alias | length > 0
+    fail_msg: >-
+      No *_high alias was configured or discovered in
+      {{ oracle_adb_wallet_directory }}/tnsnames.ora. Set
+      FOCUS_LOADER_DB_TNS_ALIAS explicitly.
+
+- name: Make FOCUS build and database deployment scripts executable
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: file
+    owner: oracle
+    group: oracle
+    mode: "0755"
+  loop:
+    - "{{ oracle_application_repository_destination }}/build-linux.sh"
+    - "{{ oracle_application_repository_destination }}/sql_scripts/run_deploy_focus_schema_with_sqlloader_audit.sh"
+    - "{{ oracle_application_repository_destination }}/sql_scripts/deploy_focus_schema_with_sqlloader_audit.sh"
+
+- name: Build the FOCUS loader Linux binary as oracle
+  ansible.builtin.command:
+    argv:
+      - ./build-linux.sh
+    chdir: "{{ oracle_application_repository_destination }}"
+  become: true
+  become_user: oracle
+  environment:
+    HOME: /home/oracle
+    CLIENT_HOME: "{{ instant_client_lib.stdout | dirname }}"
+    SQLLDR_PATH: "{{ instant_client_bin.stdout }}"
+    PATH: "{{ ansible_env.PATH }}:{{ instant_client_bin.stdout }}"
+    LD_LIBRARY_PATH: "{{ instant_client_lib.stdout }}"
+    TNS_ADMIN: "{{ oracle_adb_wallet_directory }}"
+  register: oracle_focus_loader_build
+  changed_when: true
+
+- name: Print FOCUS loader build results
+  ansible.builtin.debug:
+    msg:
+      - "{{ oracle_focus_loader_go_version.stdout }}"
+      - "{{ oracle_focus_loader_build.stdout_lines }}"
+
+- name: Read built FOCUS loader version
+  ansible.builtin.command:
+    argv:
+      - "{{ oracle_application_repository_destination }}/dist/focus-loader-report-upload-linux-amd64"
+      - -version
+  become: true
+  become_user: oracle
+  environment:
+    HOME: /home/oracle
+    LD_LIBRARY_PATH: "{{ instant_client_lib.stdout }}"
+  changed_when: false
+  register: oracle_focus_loader_version
+
+- name: Read built FOCUS loader help
+  ansible.builtin.command:
+    argv:
+      - "{{ oracle_application_repository_destination }}/dist/focus-loader-report-upload-linux-amd64"
+      - -help
+  become: true
+  become_user: oracle
+  environment:
+    HOME: /home/oracle
+    LD_LIBRARY_PATH: "{{ instant_client_lib.stdout }}"
+  changed_when: false
+  register: oracle_focus_loader_help
+
+- name: Verify built FOCUS loader supports requested mode
+  ansible.builtin.assert:
+    that:
+      - "'skip-preload-content-scan' in oracle_focus_loader_help.stdout"
+    success_msg: "{{ oracle_focus_loader_version.stdout }} supports metadata-only preload reporting."
+    fail_msg: Built binary does not support -skip-preload-content-scan.
+
+- name: Deploy FOCUS schema and synchronize focus.conf credential protected
+  ansible.builtin.command:
+    argv:
+      - ./run_deploy_focus_schema_with_sqlloader_audit.sh
+    chdir: "{{ oracle_application_repository_destination }}/sql_scripts"
+  become: true
+  become_user: oracle
+  environment:
+    HOME: /home/oracle
+    CLIENT_HOME: "{{ instant_client_lib.stdout | dirname }}"
+    SQLLDR_PATH: "{{ instant_client_bin.stdout }}"
+    PATH: "{{ ansible_env.PATH }}:{{ instant_client_bin.stdout }}"
+    LD_LIBRARY_PATH: "{{ instant_client_lib.stdout }}"
+    TNS_ADMIN: "{{ oracle_adb_wallet_directory }}"
+    DB_ADMIN_USER: "{{ oracle_focus_loader_db_admin_user }}"
+    DB_ADMIN_PASSWORD: "{{ oracle_focus_loader_db_admin_password }}"
+    DB_TNS_ALIAS: "{{ oracle_focus_loader_effective_tns_alias }}"
+    TARGET_SCHEMA: "{{ oracle_focus_loader_target_schema }}"
+    TARGET_SCHEMA_PASSWORD: "{{ oracle_focus_loader_target_schema_password }}"
+    DROP_EXISTING: "{{ oracle_focus_loader_drop_existing | bool | ternary('true', 'false') }}"
+    FOCUS_CONFIG_FILE: "{{ oracle_application_repository_destination }}/sql_scripts/focus.conf"
+    PARENT_CONFIG_FILE: "{{ oracle_application_repository_destination }}/focus.conf"
+  changed_when: true
+  failed_when: false
+  no_log: true
+  register: oracle_focus_loader_schema_deploy
+
+- name: Print safe FOCUS schema deployment output
+  ansible.builtin.debug:
+    msg:
+      - "Schema deployment rc: {{ oracle_focus_loader_schema_deploy.rc }}"
+      - "stdout: {{ oracle_focus_loader_schema_deploy.stdout_lines | default([]) }}"
+      - "stderr: {{ oracle_focus_loader_schema_deploy.stderr_lines | default([]) }}"
+
+- name: Require successful FOCUS schema deployment
+  ansible.builtin.assert:
+    that:
+      - oracle_focus_loader_schema_deploy.rc == 0
+    fail_msg: FOCUS schema deployment failed; review the safe output above.
+
+- name: Read working FOCUS configuration checksum
+  ansible.builtin.stat:
+    path: "{{ oracle_application_repository_destination }}/sql_scripts/focus.conf"
+    checksum_algorithm: sha256
+  register: oracle_focus_loader_working_config
+
+- name: Read parent FOCUS configuration checksum
+  ansible.builtin.stat:
+    path: "{{ oracle_application_repository_destination }}/focus.conf"
+    checksum_algorithm: sha256
+  register: oracle_focus_loader_parent_config
+
+- name: Require identical working and parent FOCUS configurations
+  ansible.builtin.assert:
+    that:
+      - oracle_focus_loader_working_config.stat.exists
+      - oracle_focus_loader_parent_config.stat.exists
+      - oracle_focus_loader_working_config.stat.checksum == oracle_focus_loader_parent_config.stat.checksum
+    success_msg: >-
+      Final focus.conf copied to
+      {{ oracle_application_repository_destination }}/focus.conf.
+    fail_msg: sql_scripts/focus.conf and parent focus.conf are missing or different.
+
+- name: Assemble protected FOCUS loader arguments
+  ansible.builtin.set_fact:
+    oracle_focus_loader_argv: >-
+      {{
+        [oracle_application_repository_destination + '/dist/focus-loader-report-upload-linux-amd64',
+         '-c', '/home/oracle/.oci/config',
+         '-t', oracle_oci_profile,
+         '-du', oracle_focus_loader_target_schema,
+         '-dn', oracle_focus_loader_effective_tns_alias] +
+        (['-ds', oracle_focus_loader_db_secret_id,
+          '-dst', oracle_focus_loader_db_secret_profile]
+         if oracle_focus_loader_db_secret_id | length > 0
+         else ['-dp', oracle_focus_loader_db_password]) +
+        ['-ns', oracle_focus_loader_namespace,
+         '-d', oracle_focus_loader_minimum_date,
+         '-workers', oracle_focus_loader_workers | string,
+         '-ts1', oracle_focus_loader_tag_special_1,
+         '-ts2', oracle_focus_loader_tag_special_2,
+         '-ts3', oracle_focus_loader_tag_special_3,
+         '-ts4', oracle_focus_loader_tag_special_4] +
+        (['-preload-report'] if oracle_focus_loader_preload_report | bool else []) +
+        (['-skip-preload-content-scan'] if oracle_focus_loader_skip_preload_content_scan | bool else []) +
+        (['-skip-tag-rows'] if oracle_focus_loader_skip_tag_rows | bool else []) +
+        (['-continue-after-report'] if oracle_focus_loader_continue_after_report | bool else [])
+      }}
+  no_log: true
+
+- name: Run FOCUS loader as the final Ansible operation credential protected
+  ansible.builtin.command:
+    argv: "{{ oracle_focus_loader_argv }}"
+    chdir: "{{ oracle_application_repository_destination }}"
+  become: true
+  become_user: oracle
+  environment:
+    HOME: /home/oracle
+    CLIENT_HOME: "{{ instant_client_lib.stdout | dirname }}"
+    SQLLDR_PATH: "{{ instant_client_bin.stdout }}"
+    PATH: "{{ ansible_env.PATH }}:{{ instant_client_bin.stdout }}"
+    LD_LIBRARY_PATH: "{{ instant_client_lib.stdout }}"
+    TNS_ADMIN: "{{ oracle_adb_wallet_directory }}"
+  changed_when: true
+  failed_when: false
+  no_log: true
+  register: oracle_focus_loader_run
+
+- name: Print safe final FOCUS loader results
+  ansible.builtin.debug:
+    msg:
+      - "FOCUS loader rc: {{ oracle_focus_loader_run.rc }}"
+      - "Target schema: {{ oracle_focus_loader_target_schema }}"
+      - "TNS alias: {{ oracle_focus_loader_effective_tns_alias }}"
+      - "Namespace: {{ oracle_focus_loader_namespace }}"
+      - "stdout: {{ oracle_focus_loader_run.stdout_lines | default([]) }}"
+      - "stderr: {{ oracle_focus_loader_run.stderr_lines | default([]) }}"
+
+- name: Require successful final FOCUS loader execution
+  ansible.builtin.assert:
+    that:
+      - oracle_focus_loader_run.rc == 0
+    fail_msg: Final FOCUS loader execution failed; review the safe output above.
+    success_msg: Final FOCUS loader execution completed successfully.

@@ -1,0 +1,89 @@
+---
+oracle_instant_client_release: "26ai"
+oracle_instant_client_install_sqlplus: true
+oracle_instant_client_release_packages:
+  26ai: oracle-instantclient-release-26ai-el8
+  23ai: oracle-instantclient-release-23ai-el8
+oracle_instant_client_packages:
+  - oracle-instantclient-basic
+  - oracle-instantclient-tools
+oracle_update_all_packages: false
+oracle_os_update_skip_broken: true
+oracle_python_executable: "/usr/bin/python3.12"
+oracle_oci_cli_python_executable: "/usr/bin/python3.11"
+oracle_python_packages:
+  - python3.12
+  - python3.12-pip
+  - python3.11
+  - python3.11-pip
+oracle_prerequisite_packages:
+  - libaio
+  - libnsl
+oracle_go_packages:
+  - golang
+oracle_go_minimum_version: "1.21"
+oracle_go_workspace: "/home/oracle/go"
+oracle_application_repository_enabled: true
+oracle_application_repository_url: "https://github.com/eugsim1/focus-loader-report-upload.git"
+oracle_application_repository_version: "HEAD"
+oracle_application_repository_destination: "/home/oracle/focus-loader-report-upload"
+oracle_application_repository_update: true
+oracle_adb_wallet_enabled: true
+oracle_adb_wallet_database_id: "{{ lookup('ansible.builtin.env', 'ADB_DATABASE_ID') }}"
+oracle_terraform_directory: "{{ playbook_dir }}/../terraform"
+oracle_adb_wallet_password: >-
+  {{ lookup('ansible.builtin.env', 'ADB_WALLET_PASSWORD')
+     | default(lookup('ansible.builtin.env', 'TF_VAR_adb_admin_password'), true) }}
+oracle_adb_wallet_generate_type: "SINGLE"
+oracle_adb_wallet_archive_path: "/home/oracle/Wallet_AutonomousDatabase.zip"
+oracle_adb_wallet_directory: "/home/oracle/adb_wallet"
+oracle_oci_profile: "DEFAULT"
+oracle_adb_test_enabled: true
+oracle_adb_admin_password: >-
+  {{ lookup('ansible.builtin.env', 'ADB_ADMIN_PASSWORD')
+     | default(lookup('ansible.builtin.env', 'TF_VAR_adb_admin_password'), true) }}
+oracle_adb_test_directory: "/home/oracle/test_adb"
+oracle_adb_test_tns_alias: ""
+oracle_adb_test_output_path: "/home/oracle/test_adb/last_test_result.txt"
+oracle_gui_enabled: true
+oracle_gui_desktop_environment: "@^graphical-server-environment"
+oracle_gui_packages:
+  - firefox
+  - tigervnc-server
+  - tigervnc-server-module
+oracle_gui_vnc_display: 1
+oracle_gui_vnc_geometry: "1280x800"
+oracle_gui_vnc_password: "{{ lookup('ansible.builtin.env', 'ORACLE_VNC_PASSWORD') }}"
+oracle_gui_vnc_port: "{{ 5900 + (oracle_gui_vnc_display | int) }}"
+
+# Optional final FOCUS loader workflow. It is disabled by default because the
+# schema deployment changes database objects and can optionally drop a user.
+oracle_focus_loader_enabled: "{{ lookup('ansible.builtin.env', 'FOCUS_LOADER_ENABLED') | default('false', true) | bool }}"
+oracle_focus_loader_build_packages:
+  - gcc
+oracle_focus_loader_db_admin_user: ADMIN
+oracle_focus_loader_db_admin_password: >-
+  {{ lookup('ansible.builtin.env', 'FOCUS_LOADER_DB_ADMIN_PASSWORD')
+     | default(oracle_adb_admin_password, true) }}
+oracle_focus_loader_db_tns_alias: "{{ lookup('ansible.builtin.env', 'FOCUS_LOADER_DB_TNS_ALIAS') }}"
+oracle_focus_loader_target_schema: "{{ lookup('ansible.builtin.env', 'FOCUS_LOADER_TARGET_SCHEMA') | default('FOCUS_GIT1', true) }}"
+oracle_focus_loader_target_schema_password: >-
+  {{ lookup('ansible.builtin.env', 'FOCUS_LOADER_TARGET_SCHEMA_PASSWORD')
+     | default(oracle_adb_admin_password, true) }}
+oracle_focus_loader_db_password: >-
+  {{ lookup('ansible.builtin.env', 'FOCUS_LOADER_DB_PASSWORD')
+     | default(oracle_focus_loader_target_schema_password, true) }}
+oracle_focus_loader_db_secret_id: "{{ lookup('ansible.builtin.env', 'FOCUS_LOADER_DB_SECRET_ID') }}"
+oracle_focus_loader_db_secret_profile: "{{ lookup('ansible.builtin.env', 'FOCUS_LOADER_DB_SECRET_PROFILE') }}"
+oracle_focus_loader_namespace: "{{ lookup('ansible.builtin.env', 'FOCUS_LOADER_NAMESPACE') | default('bling', true) }}"
+oracle_focus_loader_minimum_date: "{{ lookup('ansible.builtin.env', 'FOCUS_LOADER_MINIMUM_DATE') | default('2026-01-01', true) }}"
+oracle_focus_loader_workers: "{{ lookup('ansible.builtin.env', 'FOCUS_LOADER_WORKERS') | default('5', true) | int }}"
+oracle_focus_loader_tag_special_1: "{{ lookup('ansible.builtin.env', 'FOCUS_LOADER_TAG_SPECIAL_1') | default('Oracle-Tags.CreatedBy', true) }}"
+oracle_focus_loader_tag_special_2: "{{ lookup('ansible.builtin.env', 'FOCUS_LOADER_TAG_SPECIAL_2') | default('CCA_Basic_Tag.email', true) }}"
+oracle_focus_loader_tag_special_3: "{{ lookup('ansible.builtin.env', 'FOCUS_LOADER_TAG_SPECIAL_3') | default('Oracle_Tags.CreatedBy', true) }}"
+oracle_focus_loader_tag_special_4: "{{ lookup('ansible.builtin.env', 'FOCUS_LOADER_TAG_SPECIAL_4') | default('Oracle_Tags.CreatedOn', true) }}"
+oracle_focus_loader_drop_existing: "{{ lookup('ansible.builtin.env', 'FOCUS_LOADER_DROP_EXISTING') | default('false', true) | bool }}"
+oracle_focus_loader_preload_report: true
+oracle_focus_loader_skip_preload_content_scan: true
+oracle_focus_loader_skip_tag_rows: true
+oracle_focus_loader_continue_after_report: true

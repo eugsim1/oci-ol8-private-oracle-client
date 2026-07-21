@@ -1,0 +1,9 @@
+variable "compartment_id" { type = string }
+variable "availability_domain" { type = string }
+variable "subnet_id" { type = string }
+variable "instance_display_name" { type = string }
+variable "shape" { type = string }
+variable "ocpus" { type = number }
+variable "memory_in_gbs" { type = number }
+variable "boot_volume_size_in_gbs" { type = number }
+variable "ssh_public_key_content" { type = string }

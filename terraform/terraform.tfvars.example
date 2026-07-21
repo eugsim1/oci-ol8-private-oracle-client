@@ -1,0 +1,37 @@
+region                      = "eu-paris-1"
+compartment_id              = "ocid1.compartment.oc1..example"
+availability_domain_index   = 0
+ssh_public_key_path         = "/home/admin/.ssh/id_ed25519.pub"
+create_bastion_session      = true
+# Optional; null reuses ssh_public_key_path. The matching private key stays local.
+bastion_session_public_key_path = "/home/admin/.ssh/id_ed25519.pub"
+controller_public_cidr      = "203.0.113.10/32"
+allow_open_bastion_cidr     = false
+compute_node_name           = "ol8-private-oracle-client"
+shape                       = "VM.Standard.E5.Flex"
+ocpus                       = 1
+memory_in_gbs               = 16
+boot_volume_size_in_gbs     = 100
+bastion_session_ttl_seconds = 10800
+bastion_plugin_wait_duration = "600s"
+
+# Supply the ADMIN password through the TF_VAR_adb_admin_password environment variable.
+adb_db_name                 = "ORAPRIV"
+adb_display_name            = "Private Autonomous Database"
+adb_workload                = "OLTP"
+adb_compute_count           = 2
+adb_storage_size_in_tbs     = 1
+adb_license_model           = "LICENSE_INCLUDED"
+adb_private_endpoint_label  = "oraprivadb"
+adb_is_mtls_connection_required = false
+adb_private_endpoint_detach_wait_duration = "300s"
+
+# OCI Database Tools uses a service-managed private endpoint in the ADB VCN and
+# the ADB-generated one-way TLS HIGH connection descriptor. Existing wallet
+# clients can still use mTLS when adb_is_mtls_connection_required is false.
+database_tools_enabled                 = true
+database_tools_runtime_identity        = "AUTHENTICATED_PRINCIPAL"
+database_tools_vault_dns_wait_duration = "120s"
+# Optional: reuse existing OCI resources instead of automatic discovery/creation.
+# database_tools_endpoint_service_id = "ocid1.databasetoolsendpointservice.oc1.eu-paris-1.example"
+# database_tools_password_secret_id  = "ocid1.vaultsecret.oc1.eu-paris-1.example"

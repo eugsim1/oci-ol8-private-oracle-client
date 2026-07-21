@@ -1,0 +1,12 @@
+output "instance_id" { value = oci_core_instance.this.id }
+output "instance_name" { value = oci_core_instance.this.display_name }
+output "private_ip" { value = oci_core_instance.this.private_ip }
+output "public_ip" { value = try(oci_core_instance.this.public_ip, null) }
+output "state" { value = oci_core_instance.this.state }
+output "availability_domain" { value = oci_core_instance.this.availability_domain }
+output "image_id" { value = data.oci_core_images.oracle_linux_8.images[0].id }
+output "shape" { value = oci_core_instance.this.shape }
+output "ocpus" { value = var.ocpus }
+output "memory_in_gbs" { value = var.memory_in_gbs }
+output "boot_volume_size_in_gbs" { value = var.boot_volume_size_in_gbs }
+output "imds_v2_only" { value = true }

@@ -1,0 +1,15 @@
+output "id" { value = oci_database_autonomous_database.this.id }
+output "db_name" { value = oci_database_autonomous_database.this.db_name }
+output "display_name" { value = oci_database_autonomous_database.this.display_name }
+output "state" { value = oci_database_autonomous_database.this.state }
+output "private_endpoint" { value = oci_database_autonomous_database.this.private_endpoint }
+output "private_endpoint_ip" { value = oci_database_autonomous_database.this.private_endpoint_ip }
+output "network_security_group_id" { value = oci_core_network_security_group.database.id }
+output "db_workload" { value = oci_database_autonomous_database.this.db_workload }
+output "compute_model" { value = oci_database_autonomous_database.this.compute_model }
+output "compute_count" { value = oci_database_autonomous_database.this.compute_count }
+output "data_storage_size_in_tbs" { value = oci_database_autonomous_database.this.data_storage_size_in_tbs }
+output "license_model" { value = oci_database_autonomous_database.this.license_model }
+output "is_mtls_connection_required" { value = oci_database_autonomous_database.this.is_mtls_connection_required }
+output "subnet_id" { value = oci_database_autonomous_database.this.subnet_id }
+output "tls_high_connection_string" { value = try(local.tls_high_connection_strings[0], "") }

@@ -1,0 +1,876 @@
+---
+- name: Check local OCI CLI configuration file
+  ansible.builtin.stat:
+    path: "{{ oci_config_source }}"
+  delegate_to: localhost
+  become: false
+  register: local_oci_config
+- name: Check local OCI API private key
+  ansible.builtin.stat:
+    path: "{{ oci_private_key_source }}"
+  delegate_to: localhost
+  become: false
+  register: local_oci_private_key
+- name: Require local OCI credential files
+  ansible.builtin.assert:
+    that:
+      - local_oci_config.stat.exists
+      - local_oci_config.stat.isreg
+      - local_oci_private_key.stat.exists
+      - local_oci_private_key.stat.isreg
+    fail_msg: "Set oci_config_source and oci_private_key_source to readable files on the Ansible controller."
+  delegate_to: localhost
+  become: false
+- name: Require Oracle Linux 8.10 or newer for Python 3.12
+  ansible.builtin.assert:
+    that:
+      - ansible_distribution == "OracleLinux"
+      - ansible_distribution_version is version("8.10", ">=")
+    fail_msg: >-
+      This role requires Oracle Linux 8.10 or newer because it installs the
+      supported python3.12 packages from ol8_appstream.
+- name: Optionally update installed operating-system packages
+  ansible.builtin.dnf:
+    name: "*"
+    state: latest
+    update_only: true
+    skip_broken: "{{ oracle_os_update_skip_broken }}"
+    update_cache: true
+  when: oracle_update_all_packages | bool
+- name: Install Python 3.12 and required packages only
+  ansible.builtin.dnf:
+    name: "{{ oracle_python_packages + oracle_prerequisite_packages }}"
+    state: latest
+    update_cache: true
+- name: Install Git
+  ansible.builtin.dnf:
+    name: git
+    state: latest
+    update_cache: true
+- name: Install Go toolchain binaries
+  ansible.builtin.dnf:
+    name: "{{ oracle_go_packages }}"
+    state: latest
+    update_cache: true
+- name: Read installed Go version
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/go
+      - env
+      - GOVERSION
+  changed_when: false
+  register: oracle_go_version
+- name: Read installed Go root
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/go
+      - env
+      - GOROOT
+  changed_when: false
+  register: oracle_go_root
+- name: Require supported Go version
+  ansible.builtin.assert:
+    that:
+      - (oracle_go_version.stdout | trim | regex_replace('^go', '')) is version(oracle_go_minimum_version, '>=')
+    success_msg: "Go compiler {{ oracle_go_version.stdout | trim }} is installed."
+    fail_msg: >-
+      Go {{ oracle_go_minimum_version }} or newer is required; the installed
+      version is {{ oracle_go_version.stdout | trim }}.
+- name: Create oracle Go workspace
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: oracle
+    group: oracle
+    mode: "0755"
+  loop:
+    - "{{ oracle_go_workspace }}"
+    - "{{ oracle_go_workspace }}/bin"
+- name: Put Go toolchain and user binaries in the login PATH
+  ansible.builtin.copy:
+    content: |
+      export GOROOT="{{ oracle_go_root.stdout | trim }}"
+      export GOPATH="${GOPATH:-$HOME/go}"
+      export PATH="$GOROOT/bin:$GOPATH/bin:$PATH"
+    dest: /etc/profile.d/go.sh
+    owner: root
+    group: root
+    mode: "0644"
+- name: Verify Go command and PATH as oracle
+  ansible.builtin.shell: |
+    set -euo pipefail
+    source /etc/profile.d/go.sh
+    printf 'go_path=%s\n' "$(command -v go)"
+    go version
+    printf 'GOROOT=%s\n' "$(go env GOROOT)"
+    printf 'GOPATH=%s\n' "$(go env GOPATH)"
+    printf 'PATH=%s\n' "$PATH"
+  args:
+    executable: /bin/bash
+  become: true
+  become_user: oracle
+  environment:
+    HOME: /home/oracle
+  changed_when: false
+  register: oracle_go_verification
+- name: Print Go installation details
+  ansible.builtin.debug:
+    msg:
+      - "Go package set: {{ oracle_go_packages | join(', ') }}"
+      - "Go binary: /usr/bin/go"
+      - "Go version: {{ oracle_go_version.stdout | trim }}"
+      - "Go root: {{ oracle_go_root.stdout | trim }}"
+      - "Oracle Go workspace: {{ oracle_go_workspace }}"
+      - "Oracle verification: {{ oracle_go_verification.stdout_lines }}"
+- name: Install wallet archive extraction utility
+  ansible.builtin.dnf:
+    name: unzip
+    state: latest
+    update_cache: true
+- name: Install latest OCI CLI in an isolated environment
+  ansible.builtin.pip:
+    name: oci-cli
+    state: latest
+    virtualenv: /opt/oci-cli
+    virtualenv_command: "{{ oracle_oci_cli_python_executable }} -m venv"
+- name: Expose OCI CLI system-wide
+  ansible.builtin.file:
+    src: /opt/oci-cli/bin/oci
+    dest: /usr/local/bin/oci
+    state: link
+- name: Read opc authorized keys
+  ansible.builtin.slurp:
+    src: /home/opc/.ssh/authorized_keys
+  register: opc_authorized_keys
+- name: Ensure bootstrapped oracle account is configured
+  ansible.builtin.user:
+    name: oracle
+    shell: /bin/bash
+    create_home: true
+    groups: wheel
+    append: true
+- name: Create oracle SSH directory
+  ansible.builtin.file:
+    path: /home/oracle/.ssh
+    state: directory
+    owner: oracle
+    group: oracle
+    mode: "0700"
+- name: Copy opc keys to oracle
+  ansible.builtin.copy:
+    content: "{{ opc_authorized_keys.content | b64decode }}"
+    dest: /home/oracle/.ssh/authorized_keys
+    owner: oracle
+    group: oracle
+    mode: "0600"
+- name: Create oracle OCI directory
+  ansible.builtin.file:
+    path: /home/oracle/.oci
+    state: directory
+    owner: oracle
+    group: oracle
+    mode: "0700"
+- name: Copy OCI API key
+  ansible.builtin.copy:
+    src: "{{ oci_private_key_source }}"
+    dest: "/home/oracle/.oci/{{ oci_private_key_filename }}"
+    owner: oracle
+    group: oracle
+    mode: "0600"
+  no_log: true
+- name: Copy OCI CLI configuration
+  ansible.builtin.copy:
+    src: "{{ oci_config_source }}"
+    dest: /home/oracle/.oci/config
+    owner: oracle
+    group: oracle
+    mode: "0600"
+  no_log: true
+- name: Point OCI profiles to the copied key
+  ansible.builtin.replace:
+    path: /home/oracle/.oci/config
+    regexp: '^key_file\s*=.*$'
+    replace: 'key_file=/home/oracle/.oci/{{ oci_private_key_filename }}'
+  no_log: true
+- name: Initialize graphical desktop provisioning status
+  ansible.builtin.set_fact:
+    oracle_gui_provisioning_status: "{{ 'pending' if oracle_gui_enabled | bool else 'skipped' }}"
+    oracle_gui_failure_task: ""
+    oracle_gui_failure_message: ""
+- name: Configure optional graphical desktop without blocking core provisioning
+  block:
+    - name: Run graphical desktop task set
+      ansible.builtin.include_tasks: gui.yml
+    - name: Mark graphical desktop provisioning successful
+      ansible.builtin.set_fact:
+        oracle_gui_provisioning_status: success
+  rescue:
+    - name: Record nonfatal graphical desktop failure
+      ansible.builtin.set_fact:
+        oracle_gui_provisioning_status: failed
+        oracle_gui_failure_task: "{{ ansible_failed_task.name | default('unknown graphical task') }}"
+        oracle_gui_failure_message: "{{ ansible_failed_result.msg | default('No failure message was returned') }}"
+    - name: Report graphical desktop failure and continue
+      ansible.builtin.debug:
+        msg:
+          - "NONFATAL: graphical desktop provisioning failed."
+          - "Failed task: {{ oracle_gui_failure_task }}"
+          - "Reason: {{ oracle_gui_failure_message }}"
+          - "Core Oracle, wallet, database test, and application provisioning will continue."
+  always:
+    - name: Write graphical desktop status on target
+      ansible.builtin.copy:
+        content: |
+          status={{ oracle_gui_provisioning_status }}
+          failed_task={{ oracle_gui_failure_task }}
+          message={{ oracle_gui_failure_message | regex_replace('[\r\n]+', ' ') }}
+        dest: /home/oracle/gui-provisioning-status.txt
+        owner: oracle
+        group: oracle
+        mode: "0644"
+      failed_when: false
+    - name: Write graphical desktop status on controller
+      ansible.builtin.copy:
+        content: |
+          status={{ oracle_gui_provisioning_status }}
+          failed_task={{ oracle_gui_failure_task }}
+          message={{ oracle_gui_failure_message | regex_replace('[\r\n]+', ' ') }}
+        dest: "{{ controller_report_directory }}/gui-provisioning-status.txt"
+        mode: "0644"
+      delegate_to: localhost
+      become: false
+      failed_when: false
+      when: controller_report_directory is defined
+    - name: Print final graphical desktop provisioning status
+      ansible.builtin.debug:
+        msg:
+          - "Graphical desktop status: {{ oracle_gui_provisioning_status }}"
+          - "Target status file: /home/oracle/gui-provisioning-status.txt"
+  when: oracle_gui_enabled | bool
+- name: Record disabled graphical desktop status
+  ansible.builtin.copy:
+    content: |
+      status=skipped
+      failed_task=
+      message=Disabled by oracle_gui_enabled
+    dest: /home/oracle/gui-provisioning-status.txt
+    owner: oracle
+    group: oracle
+    mode: "0644"
+  failed_when: false
+  when: not (oracle_gui_enabled | bool)
+- name: Record disabled graphical desktop status on controller
+  ansible.builtin.copy:
+    content: |
+      status=skipped
+      failed_task=
+      message=Disabled by oracle_gui_enabled
+    dest: "{{ controller_report_directory }}/gui-provisioning-status.txt"
+    mode: "0644"
+  delegate_to: localhost
+  become: false
+  failed_when: false
+  when:
+    - not (oracle_gui_enabled | bool)
+    - controller_report_directory is defined
+- name: Read Autonomous Database OCID from Terraform when not supplied
+  ansible.builtin.command:
+    argv:
+      - terraform
+      - "-chdir={{ oracle_terraform_directory }}"
+      - output
+      - -raw
+      - autonomous_database_id
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  failed_when: false
+  register: oracle_adb_wallet_terraform_id
+  when:
+    - oracle_adb_wallet_enabled | bool
+    - oracle_adb_wallet_database_id | trim | length == 0
+- name: Use Autonomous Database OCID returned by Terraform
+  ansible.builtin.set_fact:
+    oracle_adb_wallet_database_id: "{{ oracle_adb_wallet_terraform_id.stdout | trim }}"
+  when:
+    - oracle_adb_wallet_enabled | bool
+    - oracle_adb_wallet_database_id | trim | length == 0
+    - (oracle_adb_wallet_terraform_id.rc | default(1)) == 0
+    - oracle_adb_wallet_terraform_id.stdout | default('') | trim | length > 0
+- name: Print Terraform Autonomous Database OCID lookup result
+  ansible.builtin.debug:
+    msg:
+      - "Terraform directory: {{ oracle_terraform_directory }}"
+      - "Terraform lookup attempted: {{ not (oracle_adb_wallet_terraform_id.skipped | default(false)) }}"
+      - "Terraform return code: {{ oracle_adb_wallet_terraform_id.rc | default('not executed') }}"
+      - "Terraform Autonomous Database OCID: {{ oracle_adb_wallet_terraform_id.stdout | default('not executed') | trim }}"
+      - "Terraform error: {{ oracle_adb_wallet_terraform_id.stderr | default('') | trim }}"
+  when: oracle_adb_wallet_enabled | bool
+- name: Show Autonomous Database wallet settings excluding secrets
+  ansible.builtin.debug:
+    msg:
+      - "Wallet deployment enabled: {{ oracle_adb_wallet_enabled | bool }}"
+      - "Autonomous Database OCID: {{ oracle_adb_wallet_database_id }}"
+      - "OCI profile: {{ oracle_oci_profile }}"
+      - "Wallet type: {{ oracle_adb_wallet_generate_type }}"
+      - "Wallet archive: {{ oracle_adb_wallet_archive_path }}"
+      - "Wallet installation directory: {{ oracle_adb_wallet_directory }}"
+      - "Wallet password supplied: {{ (oracle_adb_wallet_password | length) > 0 }}"
+      - "Wallet password length: {{ oracle_adb_wallet_password | length }}"
+  when: oracle_adb_wallet_enabled | bool
+- name: Validate Autonomous Database wallet settings with visible diagnostics
+  ansible.builtin.assert:
+    that:
+      - oracle_adb_wallet_database_id is match('^ocid1\.autonomousdatabase\.')
+      - oracle_adb_wallet_password | length >= 8
+      - oracle_adb_wallet_password is search('[A-Za-z]')
+      - oracle_adb_wallet_password is search('[0-9]|[^A-Za-z0-9]')
+      - oracle_adb_wallet_generate_type in ['SINGLE', 'ALL']
+      - oracle_adb_wallet_archive_path is match('^/home/oracle/.+\.zip$')
+      - oracle_adb_wallet_directory is match('^/home/oracle/.+')
+    fail_msg: >-
+      Wallet deployment requires a valid Autonomous Database OCID, an OCI-compliant
+      wallet password (at least 8 characters, containing a letter and a number or
+      special character), SINGLE or ALL wallet type, and archive/destination paths
+      below /home/oracle. Review the non-secret settings printed above.
+    success_msg: >-
+      Wallet settings validated. Installation directory:
+      {{ oracle_adb_wallet_directory }}
+  when: oracle_adb_wallet_enabled | bool
+- name: Get Autonomous Database details with OCI CLI
+  ansible.builtin.command:
+    argv:
+      - /usr/local/bin/oci
+      - db
+      - autonomous-database
+      - get
+      - --autonomous-database-id
+      - "{{ oracle_adb_wallet_database_id }}"
+      - --config-file
+      - /home/oracle/.oci/config
+      - --profile
+      - "{{ oracle_oci_profile }}"
+      - --output
+      - json
+  become: true
+  become_user: oracle
+  environment:
+    HOME: /home/oracle
+  changed_when: false
+  failed_when: false
+  register: oracle_adb_oci_get_result
+  when: oracle_adb_wallet_enabled | bool
+- name: Print OCI CLI Autonomous Database get result
+  ansible.builtin.debug:
+    msg:
+      - "Command: oci db autonomous-database get --autonomous-database-id {{ oracle_adb_wallet_database_id }}"
+      - "OCI CLI return code: {{ oracle_adb_oci_get_result.rc }}"
+      - "OCI CLI stdout:"
+      - "{{ oracle_adb_oci_get_result.stdout | default('') }}"
+      - "OCI CLI stderr: {{ oracle_adb_oci_get_result.stderr | default('') }}"
+  when: oracle_adb_wallet_enabled | bool
+- name: Require OCI CLI access to Autonomous Database
+  ansible.builtin.assert:
+    that:
+      - oracle_adb_oci_get_result.rc == 0
+      - oracle_adb_oci_get_result.stdout | length > 0
+    fail_msg: >-
+      OCI CLI could not retrieve the Autonomous Database. Check the OCID, region,
+      OCI profile, copied API key, IAM policy, and the full OCI output printed above.
+    success_msg: >-
+      OCI CLI successfully retrieved Autonomous Database
+      {{ oracle_adb_wallet_database_id }}.
+  when: oracle_adb_wallet_enabled | bool
+- name: Create Autonomous Database wallet directory
+  ansible.builtin.file:
+    path: "{{ oracle_adb_wallet_directory }}"
+    state: directory
+    owner: oracle
+    group: oracle
+    mode: "0700"
+  when: oracle_adb_wallet_enabled | bool
+- name: Download Autonomous Database wallet with OCI CLI
+  ansible.builtin.command:
+    argv:
+      - /usr/local/bin/oci
+      - db
+      - autonomous-database
+      - generate-wallet
+      - --autonomous-database-id
+      - "{{ oracle_adb_wallet_database_id }}"
+      - --file
+      - "{{ oracle_adb_wallet_archive_path }}"
+      - --password
+      - "{{ oracle_adb_wallet_password }}"
+      - --generate-type
+      - "{{ oracle_adb_wallet_generate_type }}"
+      - --config-file
+      - /home/oracle/.oci/config
+      - --profile
+      - "{{ oracle_oci_profile }}"
+    creates: "{{ oracle_adb_wallet_archive_path }}"
+  become: true
+  become_user: oracle
+  environment:
+    HOME: /home/oracle
+  failed_when: false
+  no_log: true
+  register: oracle_adb_wallet_download_result
+  when: oracle_adb_wallet_enabled | bool
+- name: Inspect downloaded Autonomous Database wallet archive
+  ansible.builtin.stat:
+    path: "{{ oracle_adb_wallet_archive_path }}"
+    checksum_algorithm: sha256
+  register: oracle_adb_wallet_archive_stat
+  when: oracle_adb_wallet_enabled | bool
+- name: Print safe OCI CLI wallet download result
+  ansible.builtin.debug:
+    msg:
+      - "Command: oci db autonomous-database generate-wallet"
+      - "Autonomous Database OCID: {{ oracle_adb_wallet_database_id }}"
+      - "Wallet CLI task changed: {{ oracle_adb_wallet_download_result.changed | default(false) }}"
+      - "Wallet CLI return code: {{ oracle_adb_wallet_download_result.rc | default('skipped by creates') }}"
+      - "Wallet CLI message: {{ oracle_adb_wallet_download_result.msg | default('') }}"
+      - "Wallet CLI stdout: {{ oracle_adb_wallet_download_result.stdout | default('') }}"
+      - "Wallet CLI stderr: {{ oracle_adb_wallet_download_result.stderr | default('') }}"
+      - "Wallet archive exists: {{ oracle_adb_wallet_archive_stat.stat.exists }}"
+      - "Wallet archive path: {{ oracle_adb_wallet_archive_path }}"
+      - "Wallet archive size: {{ oracle_adb_wallet_archive_stat.stat.size | default(0) }} bytes"
+      - "Wallet archive SHA256: {{ oracle_adb_wallet_archive_stat.stat.checksum | default('not available') }}"
+      - "Wallet archive owner: {{ oracle_adb_wallet_archive_stat.stat.pw_name | default('not available') }}"
+      - "Wallet archive mode: {{ oracle_adb_wallet_archive_stat.stat.mode | default('not available') }}"
+  when: oracle_adb_wallet_enabled | bool
+- name: Require successful Autonomous Database wallet download
+  ansible.builtin.assert:
+    that:
+      - oracle_adb_wallet_archive_stat.stat.exists
+      - oracle_adb_wallet_archive_stat.stat.isreg
+      - oracle_adb_wallet_archive_stat.stat.size | int > 0
+      - (oracle_adb_wallet_download_result.rc | default(0)) == 0
+    fail_msg: >-
+      The OCI wallet command did not produce a non-empty wallet archive. Review
+      the safe OCI CLI result printed above. The password remains redacted.
+    success_msg: >-
+      OCI wallet download verified at {{ oracle_adb_wallet_archive_path }}.
+  when: oracle_adb_wallet_enabled | bool
+- name: Protect downloaded Autonomous Database wallet archive
+  ansible.builtin.file:
+    path: "{{ oracle_adb_wallet_archive_path }}"
+    state: file
+    owner: oracle
+    group: oracle
+    mode: "0600"
+  when: oracle_adb_wallet_enabled | bool
+- name: Extract Autonomous Database wallet
+  ansible.builtin.unarchive:
+    src: "{{ oracle_adb_wallet_archive_path }}"
+    dest: "{{ oracle_adb_wallet_directory }}"
+    remote_src: true
+    creates: "{{ oracle_adb_wallet_directory }}/cwallet.sso"
+  become: true
+  become_user: oracle
+  when: oracle_adb_wallet_enabled | bool
+- name: Update wallet location in sqlnet.ora
+  ansible.builtin.replace:
+    path: "{{ oracle_adb_wallet_directory }}/sqlnet.ora"
+    regexp: '(DIRECTORY\s*=\s*)"?\?/network/admin"?'
+    replace: '\1"{{ oracle_adb_wallet_directory }}"'
+    backup: true
+  when: oracle_adb_wallet_enabled | bool
+- name: Protect extracted Autonomous Database wallet files
+  ansible.builtin.file:
+    path: "{{ oracle_adb_wallet_directory }}"
+    state: directory
+    owner: oracle
+    group: oracle
+    mode: "u=rwX,go="
+    recurse: true
+  when: oracle_adb_wallet_enabled | bool
+- name: Inspect Autonomous Database wallet installation directory
+  ansible.builtin.find:
+    paths: "{{ oracle_adb_wallet_directory }}"
+    file_type: file
+    recurse: false
+  register: oracle_adb_wallet_directory_files
+  when: oracle_adb_wallet_enabled | bool
+- name: Print Autonomous Database wallet installation directory contents
+  ansible.builtin.debug:
+    msg:
+      - "Wallet installation directory: {{ oracle_adb_wallet_directory }}"
+      - >-
+        Wallet files: {{ oracle_adb_wallet_directory_files.files
+          | map(attribute='path') | sort | list }}
+  when: oracle_adb_wallet_enabled | bool
+- name: Configure TNS_ADMIN for Autonomous Database clients
+  ansible.builtin.copy:
+    content: "export TNS_ADMIN=\"{{ oracle_adb_wallet_directory }}\"\n"
+    dest: /etc/profile.d/oracle-adb-wallet.sh
+    owner: root
+    group: root
+    mode: "0644"
+  when: oracle_adb_wallet_enabled | bool
+- name: Configure global TNS_ADMIN environment variable
+  ansible.builtin.lineinfile:
+    path: /etc/environment
+    regexp: '^TNS_ADMIN='
+    line: 'TNS_ADMIN="{{ oracle_adb_wallet_directory }}"'
+    create: true
+    owner: root
+    group: root
+    mode: "0644"
+  when: oracle_adb_wallet_enabled | bool
+- name: Inspect required Autonomous Database wallet files
+  ansible.builtin.stat:
+    path: "{{ oracle_adb_wallet_directory }}/{{ item }}"
+  loop:
+    - cwallet.sso
+    - ewallet.p12
+    - tnsnames.ora
+    - sqlnet.ora
+  register: oracle_adb_wallet_required_files
+  when: oracle_adb_wallet_enabled | bool
+- name: Read configured wallet sqlnet.ora with visible output
+  ansible.builtin.command:
+    argv:
+      - cat
+      - "{{ oracle_adb_wallet_directory }}/sqlnet.ora"
+  changed_when: false
+  register: oracle_adb_wallet_sqlnet
+  when: oracle_adb_wallet_enabled | bool
+- name: Print configured wallet sqlnet.ora
+  ansible.builtin.debug:
+    msg:
+      - "sqlnet.ora path: {{ oracle_adb_wallet_directory }}/sqlnet.ora"
+      - "{{ oracle_adb_wallet_sqlnet.stdout }}"
+  when: oracle_adb_wallet_enabled | bool
+- name: Verify Autonomous Database wallet installation
+  ansible.builtin.assert:
+    that:
+      - oracle_adb_wallet_required_files.results | map(attribute='stat.exists') | min
+      - oracle_adb_wallet_directory in oracle_adb_wallet_sqlnet.stdout
+    fail_msg: >-
+      The wallet is incomplete or sqlnet.ora does not contain the configured
+      wallet directory {{ oracle_adb_wallet_directory }}.
+    success_msg: >-
+      Autonomous Database wallet verified at {{ oracle_adb_wallet_directory }};
+      sqlnet.ora uses this absolute wallet path.
+  when: oracle_adb_wallet_enabled | bool
+- name: Show Autonomous Database wallet installation paths
+  ansible.builtin.debug:
+    msg:
+      - "Wallet archive: {{ oracle_adb_wallet_archive_path }}"
+      - "Extracted wallet: {{ oracle_adb_wallet_directory }}"
+      - "SQLNet configuration: {{ oracle_adb_wallet_directory }}/sqlnet.ora"
+      - "TNS_ADMIN: {{ oracle_adb_wallet_directory }}"
+  when: oracle_adb_wallet_enabled | bool
+- name: Validate application repository settings
+  ansible.builtin.assert:
+    that:
+      - oracle_application_repository_url | length > 0
+      - oracle_application_repository_version | length > 0
+      - oracle_application_repository_destination is match('^/home/oracle/.+')
+    fail_msg: >-
+      Set a non-empty repository URL and revision, and use an absolute clone
+      destination below /home/oracle.
+  when: oracle_application_repository_enabled | bool
+- name: Clone or update application repository as oracle
+  ansible.builtin.git:
+    repo: "{{ oracle_application_repository_url }}"
+    dest: "{{ oracle_application_repository_destination }}"
+    version: "{{ oracle_application_repository_version }}"
+    update: "{{ oracle_application_repository_update }}"
+    force: false
+  become: true
+  become_user: oracle
+  environment:
+    HOME: /home/oracle
+  register: oracle_application_repository_checkout
+  when: oracle_application_repository_enabled | bool
+- name: Resolve cloned repository installation path on target
+  ansible.builtin.command:
+    argv:
+      - git
+      - -C
+      - "{{ oracle_application_repository_destination }}"
+      - rev-parse
+      - --show-toplevel
+  become: true
+  become_user: oracle
+  environment:
+    HOME: /home/oracle
+  changed_when: false
+  register: oracle_application_repository_installed_path
+  when: oracle_application_repository_enabled | bool
+- name: Verify cloned repository installation path
+  ansible.builtin.assert:
+    that:
+      - >-
+        (oracle_application_repository_installed_path.stdout | trim)
+        == (oracle_application_repository_destination | regex_replace('/+$', ''))
+    fail_msg: >-
+      Git resolved {{ oracle_application_repository_installed_path.stdout | trim }}
+      instead of the configured destination
+      {{ oracle_application_repository_destination | regex_replace('/+$', '') }}.
+    success_msg: >-
+      Repository verified at full target path:
+      {{ oracle_application_repository_installed_path.stdout | trim }}
+  when: oracle_application_repository_enabled | bool
+- name: Show application repository checkout
+  ansible.builtin.debug:
+    msg:
+      - "Repository: {{ oracle_application_repository_url }}"
+      - "Requested revision: {{ oracle_application_repository_version }}"
+      - "Checked-out commit: {{ oracle_application_repository_checkout.after }}"
+      - "Full target installation path: {{ oracle_application_repository_installed_path.stdout | trim }}"
+  when: oracle_application_repository_enabled | bool
+- name: Validate requested Instant Client release
+  ansible.builtin.assert:
+    that:
+      - oracle_instant_client_release in oracle_instant_client_release_packages
+    fail_msg: "oracle_instant_client_release must be 26ai or 23ai."
+- name: Install Oracle Instant Client repository definitions
+  ansible.builtin.dnf:
+    name:
+      - oraclelinux-release-el8
+      - dnf-plugins-core
+      - "{{ oracle_instant_client_release_packages[oracle_instant_client_release] }}"
+    state: latest
+    update_cache: true
+- name: Build Oracle Instant Client package list
+  ansible.builtin.set_fact:
+    oracle_instant_client_packages_effective: >-
+      {{ oracle_instant_client_packages
+         + (['oracle-instantclient-sqlplus'] if oracle_instant_client_install_sqlplus | bool else []) }}
+- name: Show Oracle Instant Client DNF selection
+  ansible.builtin.debug:
+    msg:
+      - "Release channel: {{ oracle_instant_client_release }}"
+      - "Release package: {{ oracle_instant_client_release_packages[oracle_instant_client_release] }}"
+      - "Packages: {{ oracle_instant_client_packages_effective | join(', ') }}"
+- name: Install and diagnose Oracle Instant Client RPM packages
+  block:
+    - name: Install Oracle Instant Client Basic Tools and optional SQLPlus
+      ansible.builtin.dnf:
+        name: "{{ oracle_instant_client_packages_effective }}"
+        state: latest
+        update_cache: true
+  rescue:
+    - name: List repositories related to Instant Client
+      ansible.builtin.shell: "dnf repolist all | grep -i instantclient || true"
+      args:
+        executable: /bin/bash
+      changed_when: false
+      register: instant_client_repo_diagnostics
+    - name: List available Instant Client packages
+      ansible.builtin.command:
+        argv:
+          - dnf
+          - list
+          - --available
+          - "oracle-instantclient*"
+      changed_when: false
+      failed_when: false
+      register: instant_client_package_diagnostics
+    - name: Show Instant Client repository diagnostics
+      ansible.builtin.debug:
+        msg:
+          - "Repositories: {{ instant_client_repo_diagnostics.stdout_lines }}"
+          - "Available packages: {{ instant_client_package_diagnostics.stdout_lines }}"
+    - name: Stop because Instant Client packages could not be installed
+      ansible.builtin.fail:
+        msg: >-
+          Oracle Instant Client RPM installation failed. Review the repository
+          and available-package diagnostics printed immediately above.
+- name: Discover Oracle Instant Client binary directory
+  ansible.builtin.shell: >-
+    set -o pipefail &&
+    find /usr/lib/oracle -type d -path '*/client64/bin' 2>/dev/null |
+    sort -V | tail -n 1
+  args:
+    executable: /bin/bash
+  changed_when: false
+  register: instant_client_bin
+- name: Discover Oracle Instant Client library directory
+  ansible.builtin.shell: >-
+    set -o pipefail &&
+    find /usr/lib/oracle -type d -path '*/client64/lib' 2>/dev/null |
+    sort -V | tail -n 1
+  args:
+    executable: /bin/bash
+  changed_when: false
+  register: instant_client_lib
+- name: Require Instant Client binary and library directories
+  ansible.builtin.assert:
+    that:
+      - instant_client_bin.stdout | length > 0
+      - instant_client_lib.stdout | length > 0
+    fail_msg: "Instant Client RPMs installed but client64/bin or client64/lib was not found under /usr/lib/oracle."
+- name: Configure dynamic linker
+  ansible.builtin.copy:
+    content: "{{ instant_client_lib.stdout }}\n"
+    dest: /etc/ld.so.conf.d/oracle-instantclient.conf
+    mode: "0644"
+  notify: Run ldconfig
+- name: Configure Instant Client environment
+  ansible.builtin.copy:
+    content: |
+      export ORACLE_INSTANTCLIENT_BIN="{{ instant_client_bin.stdout }}"
+      export ORACLE_INSTANTCLIENT_LIB="{{ instant_client_lib.stdout }}"
+      export PATH="{{ instant_client_bin.stdout }}:$PATH"
+      export LD_LIBRARY_PATH="{{ instant_client_lib.stdout }}:${LD_LIBRARY_PATH:-}"
+    dest: /etc/profile.d/oracle-instantclient.sh
+    mode: "0644"
+- name: Verify OCI CLI as oracle
+  ansible.builtin.command: /usr/local/bin/oci --config-file /home/oracle/.oci/config --version
+  become_user: oracle
+  changed_when: false
+  register: oci_cli_version
+- name: Verify Python version
+  ansible.builtin.command: "{{ oracle_python_executable }} --version"
+  changed_when: false
+  register: python_version
+- name: Verify OCI CLI Python runtime version
+  ansible.builtin.command: "{{ oracle_oci_cli_python_executable }} --version"
+  changed_when: false
+  register: oci_cli_python_version
+- name: Verify SQLPlus version
+  ansible.builtin.command: "{{ instant_client_bin.stdout }}/sqlplus -version"
+  environment:
+    LD_LIBRARY_PATH: "{{ instant_client_lib.stdout }}"
+  changed_when: false
+  register: sqlplus_version
+  when: oracle_instant_client_install_sqlplus | bool
+- name: Capture SQLLoader help and release banner
+  ansible.builtin.command: "{{ instant_client_bin.stdout }}/sqlldr -help"
+  environment:
+    LD_LIBRARY_PATH: "{{ instant_client_lib.stdout }}"
+  changed_when: false
+  failed_when: false
+  register: sqlldr_version
+- name: Verify SQLLoader started successfully
+  ansible.builtin.assert:
+    that:
+      - "'SQL*Loader' in ((sqlldr_version.stdout | default('')) ~ (sqlldr_version.stderr | default('')))"
+    fail_msg: >-
+      SQL*Loader did not return its release banner. rc={{ sqlldr_version.rc }};
+      stdout={{ sqlldr_version.stdout | default('') }};
+      stderr={{ sqlldr_version.stderr | default('') }}
+    success_msg: SQL*Loader is installed and returned its release banner.
+- name: Validate Autonomous Database connection test settings
+  ansible.builtin.assert:
+    that:
+      - oracle_adb_wallet_enabled | bool
+      - oracle_instant_client_install_sqlplus | bool
+      - oracle_adb_admin_password | length > 0
+      - oracle_adb_test_directory is match('^/home/oracle/.+')
+      - oracle_adb_test_output_path is match('^/home/oracle/.+')
+    fail_msg: >-
+      The database test requires wallet deployment, SQLPlus, the ADMIN password,
+      and test paths below /home/oracle. Export ADB_ADMIN_PASSWORD or
+      TF_VAR_adb_admin_password on the Ansible controller.
+    success_msg: >-
+      Database connection test settings validated. Safe SQLPlus output will be
+      written to {{ oracle_adb_test_output_path }}.
+  when: oracle_adb_test_enabled | bool
+- name: Create reusable Autonomous Database test directory
+  ansible.builtin.file:
+    path: "{{ oracle_adb_test_directory }}"
+    state: directory
+    owner: oracle
+    group: oracle
+    mode: "0700"
+  when: oracle_adb_test_enabled | bool
+- name: Install reusable Autonomous Database connection test script
+  ansible.builtin.template:
+    src: test_adb_connection.sh.j2
+    dest: "{{ oracle_adb_test_directory }}/test_adb_connection.sh"
+    owner: oracle
+    group: oracle
+    mode: "0700"
+  when: oracle_adb_test_enabled | bool
+- name: Show Autonomous Database connection test inputs excluding password
+  ansible.builtin.debug:
+    msg:
+      - "Test script: {{ oracle_adb_test_directory }}/test_adb_connection.sh"
+      - "TNS_ADMIN: {{ oracle_adb_wallet_directory }}"
+      - >-
+        TNS alias: {{ oracle_adb_test_tns_alias
+          if oracle_adb_test_tns_alias | length > 0
+          else 'auto-discover first _high alias from tnsnames.ora' }}
+      - "Database user: ADMIN"
+      - "ADMIN password supplied: {{ (oracle_adb_admin_password | length) > 0 }}"
+      - "ADMIN password length: {{ oracle_adb_admin_password | length }}"
+      - "Result file: {{ oracle_adb_test_output_path }}"
+  when: oracle_adb_test_enabled | bool
+- name: Run ADMIN connection test using the high TNS service credential protected
+  ansible.builtin.command: "{{ oracle_adb_test_directory }}/test_adb_connection.sh"
+  become: true
+  become_user: oracle
+  environment:
+    HOME: /home/oracle
+    TNS_ADMIN: "{{ oracle_adb_wallet_directory }}"
+    LD_LIBRARY_PATH: "{{ instant_client_lib.stdout }}"
+    SQLPLUS_BIN: "{{ instant_client_bin.stdout }}/sqlplus"
+    ADB_ADMIN_PASSWORD: "{{ oracle_adb_admin_password }}"
+    ADB_TNS_ALIAS: "{{ oracle_adb_test_tns_alias }}"
+    ADB_TEST_OUTPUT: "{{ oracle_adb_test_output_path }}"
+  changed_when: false
+  failed_when: false
+  no_log: true
+  register: oracle_adb_connection_test
+  when: oracle_adb_test_enabled | bool
+- name: Inspect Autonomous Database connection test result file
+  ansible.builtin.stat:
+    path: "{{ oracle_adb_test_output_path }}"
+  register: oracle_adb_connection_test_result_file
+  when: oracle_adb_test_enabled | bool
+- name: Read Autonomous Database connection test results
+  ansible.builtin.slurp:
+    src: "{{ oracle_adb_test_output_path }}"
+  register: oracle_adb_connection_test_output
+  when:
+    - oracle_adb_test_enabled | bool
+    - oracle_adb_connection_test_result_file.stat.exists
+- name: Print Autonomous Database connection test results
+  ansible.builtin.debug:
+    msg:
+      - "SQLPlus safe result file: {{ oracle_adb_test_output_path }}"
+      - "{{ oracle_adb_connection_test_output.content | b64decode }}"
+  when:
+    - oracle_adb_test_enabled | bool
+    - oracle_adb_connection_test_result_file.stat.exists
+- name: Require successful Autonomous Database ADMIN connection
+  ansible.builtin.assert:
+    that:
+      - oracle_adb_connection_test.rc == 0
+      - oracle_adb_connection_test_result_file.stat.exists
+    fail_msg: >-
+      SQLPlus could not connect as ADMIN through the high TNS service. Review
+      the safe test output printed above and
+      {{ oracle_adb_test_output_path }} on the target.
+    success_msg: >-
+      SQLPlus connected successfully as ADMIN. Reusable test:
+      {{ oracle_adb_test_directory }}/test_adb_connection.sh
+  when: oracle_adb_test_enabled | bool
+- name: Show installed component versions
+  ansible.builtin.debug:
+    msg:
+      - "{{ python_version.stdout }}"
+      - "OCI CLI runtime: {{ oci_cli_python_version.stdout }}"
+      - "OCI CLI: {{ oci_cli_version.stdout | default(oci_cli_version.stderr) }}"
+      - "SQLPlus: {{ sqlplus_version.stdout | default('not installed') }}"
+      - >-
+        SQLLoader: {{
+          (((sqlldr_version.stdout | default('')) ~ '\n' ~
+          (sqlldr_version.stderr | default('')))
+          | regex_search('SQL\\*Loader: Release[^\\r\\n]*'))
+          | default('installed', true)
+        }}
+      - "OCI configuration: /home/oracle/.oci/config"
+      - "Instant Client bin: {{ instant_client_bin.stdout }}"
+      - "Instant Client lib: {{ instant_client_lib.stdout }}"
+      - "TNS_ADMIN: {{ oracle_adb_wallet_directory if oracle_adb_wallet_enabled | bool else 'not configured' }}"
+      - "ADB connection test: {{ oracle_adb_test_output_path if oracle_adb_test_enabled | bool else 'disabled' }}"
+- name: Run optional FOCUS loader workflow as the final provisioning stage
+  ansible.builtin.include_tasks: focus_loader.yml
+  when: oracle_focus_loader_enabled | bool

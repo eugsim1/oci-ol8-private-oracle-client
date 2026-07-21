@@ -1,0 +1,69 @@
+---
+oracle_instant_client_release: "26ai"
+oracle_instant_client_install_sqlplus: true
+oracle_instant_client_release_packages:
+  26ai: oracle-instantclient-release-26ai-el8
+  23ai: oracle-instantclient-release-23ai-el8
+oracle_instant_client_packages:
+  - oracle-instantclient-basic
+  - oracle-instantclient-tools
+# Full OS patching is separate from prerequisite installation because broad
+# DNF upgrades can be blocked by unrelated optional repository packages.
+oracle_update_all_packages: false
+oracle_os_update_skip_broken: true
+oracle_python_executable: "/usr/bin/python3.12"
+oracle_oci_cli_python_executable: "/usr/bin/python3.11"
+oracle_python_packages:
+  - python3.12
+  - python3.12-pip
+  - python3.11
+  - python3.11-pip
+oracle_prerequisite_packages:
+  - libaio
+  - libnsl
+oracle_application_repository_enabled: true
+oracle_application_repository_url: "https://github.com/eugsim1/focus-loader-report-upload.git"
+oracle_application_repository_version: "HEAD"
+oracle_application_repository_destination: "/home/oracle/focus-loader-report-upload"
+oracle_application_repository_update: true
+oracle_focus_loader_enabled: false
+oracle_focus_loader_db_tns_alias: ""
+oracle_focus_loader_target_schema: "FOCUS_GIT1"
+oracle_focus_loader_namespace: "bling"
+oracle_focus_loader_minimum_date: "2026-01-01"
+oracle_focus_loader_workers: 5
+oracle_focus_loader_tag_special_1: "Oracle-Tags.CreatedBy"
+oracle_focus_loader_tag_special_2: "CCA_Basic_Tag.email"
+oracle_focus_loader_tag_special_3: "Oracle_Tags.CreatedBy"
+oracle_focus_loader_tag_special_4: "Oracle_Tags.CreatedOn"
+oracle_focus_loader_drop_existing: false
+oracle_adb_wallet_enabled: true
+oracle_adb_wallet_database_id: "ocid1.autonomousdatabase.oc1.example"
+oracle_terraform_directory: "{{ playbook_dir }}/../terraform"
+oracle_adb_wallet_password: >-
+  {{ lookup('ansible.builtin.env', 'ADB_WALLET_PASSWORD')
+     | default(lookup('ansible.builtin.env', 'TF_VAR_adb_admin_password'), true) }}
+oracle_adb_wallet_generate_type: "SINGLE"
+oracle_adb_wallet_archive_path: "/home/oracle/Wallet_AutonomousDatabase.zip"
+oracle_adb_wallet_directory: "/home/oracle/adb_wallet"
+oracle_oci_profile: "DEFAULT"
+oracle_adb_test_enabled: true
+oracle_adb_admin_password: >-
+  {{ lookup('ansible.builtin.env', 'ADB_ADMIN_PASSWORD')
+     | default(lookup('ansible.builtin.env', 'TF_VAR_adb_admin_password'), true) }}
+oracle_adb_test_directory: "/home/oracle/test_adb"
+oracle_adb_test_tns_alias: ""
+oracle_adb_test_output_path: "/home/oracle/test_adb/last_test_result.txt"
+oracle_gui_enabled: true
+oracle_gui_desktop_environment: "@^graphical-server-environment"
+oracle_gui_packages:
+  - firefox
+  - tigervnc-server
+  - tigervnc-server-module
+oracle_gui_vnc_display: 1
+oracle_gui_vnc_geometry: "1280x800"
+oracle_gui_vnc_password: "{{ lookup('ansible.builtin.env', 'ORACLE_VNC_PASSWORD') }}"
+oracle_gui_vnc_port: "{{ 5900 + (oracle_gui_vnc_display | int) }}"
+oci_config_source: "/home/admin/.oci/config"
+oci_private_key_source: "/home/admin/.oci/oci_api_key.pem"
+oci_private_key_filename: "oci_api_key.pem"

@@ -1,0 +1,11 @@
+output "bastion_id" { value = oci_bastion_bastion.this.id }
+output "session_enabled" { value = var.create_session }
+output "session_id" { value = try(oci_bastion_session.ansible[0].id, null) }
+output "session_state" { value = try(oci_bastion_session.ansible[0].state, null) }
+output "ssh_command" { value = try(oci_bastion_session.ansible[0].ssh_metadata["command"], null) }
+output "plugin_status" { value = try(data.oci_computeinstanceagent_instance_agent_plugin.bastion[0].status, null) }
+output "plugin_message" { value = try(data.oci_computeinstanceagent_instance_agent_plugin.bastion[0].message, null) }
+output "bastion_name" { value = oci_bastion_bastion.this.name }
+output "bastion_state" { value = oci_bastion_bastion.this.state }
+output "bastion_private_endpoint_ip" { value = oci_bastion_bastion.this.private_endpoint_ip_address }
+output "session_ttl_in_seconds" { value = try(oci_bastion_session.ansible[0].session_ttl_in_seconds, null) }

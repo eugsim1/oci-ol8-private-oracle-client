@@ -1,0 +1,96 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+tns_admin="${TNS_ADMIN:-{{ oracle_adb_wallet_directory }}}"
+tnsnames_file="$tns_admin/tnsnames.ora"
+sqlplus_bin="${SQLPLUS_BIN:-sqlplus}"
+result_file="${ADB_TEST_OUTPUT:-{{ oracle_adb_test_output_path }}}"
+tns_alias="${ADB_TNS_ALIAS:-}"
+
+: "${ADB_ADMIN_PASSWORD:?Set ADB_ADMIN_PASSWORD before running this test}"
+mkdir -p "$(dirname "$result_file")"
+
+# SQLPlus does not reliably read a password from the line following a CONNECT
+# command when stdin is a non-interactive here-document. Put it in the CONNECT
+# statement instead. Double any embedded quote for SQLPlus quoted-password
+# syntax; the password is sent through stdin and never placed in argv/output.
+sqlplus_password="${ADB_ADMIN_PASSWORD//\"/\"\"}"
+
+fail_test() {
+  local exit_code="$1"
+  shift
+  {
+    printf 'TNS_ADMIN=%s\n' "$tns_admin"
+    printf 'Database user=ADMIN\n'
+    printf 'ERROR: %s\n' "$*"
+    printf 'SQLPlus exit code=%s\n' "$exit_code"
+  } >"$result_file"
+  chmod 600 "$result_file"
+  cat "$result_file"
+  exit "$exit_code"
+}
+
+[[ -r "$tnsnames_file" ]] || fail_test 2 "Cannot read $tnsnames_file"
+
+if [[ -z "$tns_alias" ]]; then
+  tns_alias="$(
+    awk -F= '
+      /^[[:space:]]*[[:alnum:]_.-]+[[:space:]]*=/ {
+        alias_name=$1
+        gsub(/^[[:space:]]+|[[:space:]]+$/, "", alias_name)
+        if (tolower(alias_name) ~ /_high$/) {
+          print alias_name
+          exit
+        }
+      }
+    ' "$tnsnames_file"
+  )"
+fi
+
+[[ -n "$tns_alias" ]] || fail_test 3 "No _high service alias was found in $tnsnames_file"
+
+sql_output="$(mktemp "$(dirname "$result_file")/.sqlplus-result.XXXXXX")"
+trap 'rm -f "$sql_output"' EXIT
+
+set +e
+"$sqlplus_bin" -L -S /nolog >"$sql_output" 2>&1 <<SQL
+whenever oserror exit failure rollback
+whenever sqlerror exit sql.sqlcode rollback
+set echo off
+set verify off
+set define off
+set feedback on
+set heading on
+set pagesize 100
+set linesize 240
+connect ADMIN/"$sqlplus_password"@"$tns_alias"
+column connected_user format a20
+column database_name format a30
+column service_name format a80
+column instance_name format a30
+column test_timestamp format a35
+select user as connected_user,
+       sys_context('USERENV', 'DB_NAME') as database_name,
+       sys_context('USERENV', 'SERVICE_NAME') as service_name
+from dual;
+select sys_context('USERENV', 'INSTANCE_NAME') as instance_name,
+       to_char(systimestamp, 'YYYY-MM-DD HH24:MI:SS.FF3 TZH:TZM') as test_timestamp
+from dual;
+exit success commit
+SQL
+sql_rc=$?
+set -e
+
+{
+  printf 'TNS_ADMIN=%s\n' "$tns_admin"
+  printf 'TNS alias=%s\n' "$tns_alias"
+  printf 'Database user=ADMIN\n'
+  printf '%s\n' '--- SQLPlus result ---'
+  cat "$sql_output"
+  printf '%s\n' '--- End SQLPlus result ---'
+  printf 'SQLPlus exit code=%s\n' "$sql_rc"
+} >"$result_file"
+
+chmod 600 "$result_file"
+cat "$result_file"
+exit "$sql_rc"

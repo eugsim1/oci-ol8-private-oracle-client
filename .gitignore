@@ -1,0 +1,47 @@
+**/.terraform/
+**/.tfdata/
+**/.ansible/
+**/*.tfstate
+**/*.tfstate.*
+**/*.tfvars
+!**/*.tfvars.example
+**/*.tfplan
+**/tfplan
+**/crash.log
+**/crash.*.log
+
+# Local environment and credential material
+**/.env
+**/.env.*
+!**/.env.example
+**/.oci/
+**/*.pem
+**/*.key
+**/*.p12
+**/*.pfx
+**/*.jks
+**/id_rsa
+**/id_ed25519
+**/id_ecdsa
+**/known_hosts
+
+# Autonomous Database wallets and extracted credential bundles
+**/Wallet_*.zip
+**/adb_wallet/
+**/cwallet.sso
+**/ewallet.p12
+**/ewallet.pem
+**/keystore.jks
+**/truststore.jks
+
+# Generated controller configuration
+ansible/group_vars/all.yml
+ansible/inventory/hosts.yml
+ansible/secrets/
+
+# Reports can contain infrastructure identifiers and connection metadata
+reports/*.csv
+reports/*.log
+reports/*.env
+reports/*.txt
+!reports/.gitkeep
