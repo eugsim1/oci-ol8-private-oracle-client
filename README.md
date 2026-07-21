@@ -1,30 +1,154 @@
-# Private Oracle Linux 8 server with OCI Bastion
+# Private OCI FOCUS FinOps ETL Platform
 
-This is the private-network variant of the Oracle Linux deployment. The workload instance has only a private IP. OCI Bastion supplies a temporary managed SSH path for Ansible, a Service Gateway supplies private access to regional Oracle services, and a NAT Gateway supplies outbound access for operating-system packages, OCI CLI, PyPI, and the Oracle Instant Client RPM repository. An Autonomous AI Database and OCI Database Tools private endpoint are deployed in the same VCN.
+This project deploys and configures a private OCI utility environment for the
+multi-worker FinOps ETL described in
+[Building a Fast Multi-Worker ETL Pipeline for OCI FOCUS FinOps](https://www.linkedin.com/pulse/building-fast-multi-worker-etl-pipeline-oci-focus-finops-eugene-simos-vbytf/).
+Terraform creates the private infrastructure and Ansible turns the Oracle Linux
+host into a ready-to-run ETL node. Ansible clones the
+[`eugsim1/focus-loader-report-upload`](https://github.com/eugsim1/focus-loader-report-upload)
+project, installs its Go and Oracle runtime dependencies, creates the target
+database schema, downloads the Autonomous Database wallet, and verifies the
+private database connection.
 
-## Architecture
+The deployed utility reads OCI FOCUS cost-report objects from Object Storage,
+processes multiple gzip CSV files concurrently, enriches and normalizes the
+FOCUS rows, produces SQL*Loader-ready data, and loads it into an Autonomous AI
+Database. Load status, SQL*Loader audit data, tag metadata, and restart
+checkpoints make the pipeline suitable for repeatable FinOps processing rather
+than a one-time import.
+
+> This is an independent reference implementation. Review the source, IAM
+> policies, database schema, cost model, and security controls before using it
+> with production billing data.
+
+## Why the platform is private
+
+Cost and billing data is sensitive. The design therefore places both the ETL
+Compute instance and Autonomous Database endpoint inside a private VCN:
+
+- The Oracle Linux VNIC has no public IP and the subnet prohibits public IPs.
+- Autonomous Database uses a private endpoint and a dedicated network security
+  group; SQL traffic is limited to TLS/mTLS on TCP 1522 from the VCN.
+- The VCN has no Internet Gateway. A NAT Gateway provides outbound-only access
+  for GitHub, DNF, PyPI, and Oracle package repositories.
+- A Service Gateway provides private routing to regional Oracle services,
+  including Object Storage.
+- OCI Bastion creates a temporary, controller-CIDR-restricted SSH path. No
+  permanently running public jump host is required.
+- The Compute instance enforces IMDSv2 and disables legacy metadata endpoints.
+- SSH and OCI private keys remain on the Linux controller until Ansible copies
+  only the explicitly configured OCI credential files with restrictive modes.
+- Database Tools uses its own private endpoint and a Vault-backed password
+  reference instead of embedding a password in the connection resource.
+
+Oracle documents that an Autonomous Database private endpoint keeps database
+traffic off the public Internet. See
+[Autonomous Database private endpoint network access](https://docs.oracle.com/en-us/iaas/autonomous-database-serverless/doc/autonomous-network-access.html).
+
+## Solution architecture
+
+[![OCI FOCUS private FinOps architecture](docs/architecture/oci-focus-private-finops.png)](docs/architecture/oci-focus-private-finops.drawio)
+
+The PNG above is generated from the editable
+[Draw.io architecture source](docs/architecture/oci-focus-private-finops.drawio).
+The diagram separates the currently deployed platform from the planned Oracle
+Analytics Cloud integration.
+
+### End-to-end data and deployment flow
+
+1. A Linux controller runs Terraform against OCI APIs and creates the VCN,
+   private subnet, gateways, Compute instance, Bastion, Autonomous Database,
+   Database Tools private endpoint, Vault, KMS key, and secret.
+2. The controller opens a temporary OCI Bastion managed SSH session to the
+   private Compute IP. Ansible connects as `oracle` using the controller's local
+   SSH private key.
+3. Ansible installs Python, OCI CLI, Git, the Go toolchain, Oracle Instant
+   Client 26ai, SQL*Plus, SQL*Loader, and the optional minimal graphical tools.
+4. Ansible clones the FOCUS ETL repository, deploys the target database schema,
+   downloads and extracts the wallet, configures `TNS_ADMIN`, and validates an
+   ADMIN connection through the Autonomous Database private endpoint.
+5. The ETL lists objects below `FOCUS Reports/` in the Oracle-managed Object
+   Storage cost-report bucket and applies date and checkpoint filters.
+6. Concurrent Go workers download `.csv.gz` reports, decompress them, enrich
+   FOCUS fields, resolve compartment hierarchy and tags, and produce
+   deterministic SQL*Loader-ready CSV files.
+7. SQL*Loader sends each transformed file over the private TLS/mTLS connection
+   to Autonomous Database. Database load status and `SQLLOADER_AUDIT` retain
+   operational outcomes and restart history.
+8. Terraform and the deployment wrapper generate infrastructure and execution
+   reports without writing passwords, wallet contents, or private-key contents.
+
+### Current scope and roadmap
+
+| Capability | Status | Purpose |
+|---|---|---|
+| Private Oracle Linux ETL node | Deployed | Runs the Go workers, OCI SDK, transformation, and SQL*Loader processes. |
+| Autonomous Database private endpoint | Deployed | Stores queryable FOCUS cost, tag, audit, and checkpoint data. |
+| OCI Bastion | Deployed | Provides temporary administrative SSH access to the private host. |
+| OCI Database Tools private connection | Deployed | Enables a Vault-backed private database tools connection. |
+| Oracle Analytics Cloud | Planned for the next blog | Will consume the private FOCUS data mart and expose configurable cost-management dashboards. |
+
+The next article will add Oracle Analytics Cloud (OAC), a private access channel
+to the Autonomous Database endpoint, a governed semantic model, and configurable
+dashboards for cost trends, allocation, tag governance, anomalies, and
+chargeback/showback. OAC is shown with a dashed border in the diagram because it
+is **not** deployed by the current Terraform modules. Oracle documents that an
+OAC private access channel can reach private data sources in an OCI VCN; see
+[About Private Access Channels](https://docs.oracle.com/en-us/iaas/analytics-cloud/doc/private-access-channels.html).
+
+## What this repository deploys
+
+Terraform creates five modules:
+
+- `network`: VCN, private subnet, private route table, NAT Gateway, Service
+  Gateway, and subnet security list.
+- `compute`: Oracle Linux 8 flexible VM, private VNIC, boot volume, `oracle`
+  account bootstrap, Bastion agent, and IMDSv2-only metadata configuration.
+- `bastion`: OCI Bastion service, plugin readiness test, and optional temporary
+  managed SSH session.
+- `autonomous_database`: ECPU Autonomous AI Database, private endpoint, NSG, and
+  TLS/mTLS connection information.
+- `database_tools`: service-managed private endpoint, dedicated NSG, Vault/KMS
+  password secret or existing-secret reference, and private ADB connection.
+
+Ansible then provisions the operating system, Oracle client software, OCI CLI,
+Go, Git repository, wallet, SQL connection test, optional GUI, and optional
+final FOCUS schema/load workflow.
+
+## Project structure
 
 ```text
-Linux Ansible controller
-        |
-        | Managed SSH session (restricted controller CIDR, temporary)
-        v
-OCI Bastion service
-        |
-        | private VCN port 22
-        v
-Oracle Linux 8 private IP
-        |
-        +------ TCP 1522/TLS or mTLS ------> Autonomous Database private endpoint
-        |
-        | outbound only
-        v
-NAT Gateway -> package repositories
+.
+├── terraform/
+│   ├── modules/
+│   │   ├── network/
+│   │   ├── compute/
+│   │   ├── bastion/
+│   │   ├── autonomous_database/
+│   │   └── database_tools/
+│   ├── terraform.tfvars.example
+│   ├── report.tf
+│   └── README.md
+├── ansible/
+│   ├── roles/oracle_client/
+│   ├── inventory/hosts.yml.example
+│   ├── group_vars/all.yml.example
+│   ├── site.yml
+│   └── README.md
+├── scripts/
+│   ├── deploy.sh
+│   ├── run-ansible.sh
+│   ├── renew-bastion-session.sh
+│   ├── connect-oracle-server.sh
+│   └── open-vnc-tunnel.sh
+├── docs/architecture/
+│   ├── oci-focus-private-finops.drawio
+│   ├── oci-focus-private-finops.png
+│   └── README.md
+├── reports/                  # generated locally; contents are ignored
+├── SECURITY.md
+└── SANITIZATION_REPORT.md
 ```
-
-There is no public IP on the workload VNIC and no Internet Gateway route. OCI Bastion does not require a permanently running public jump-host VM.
-
-The Compute instance is configured for IMDSv2 only. Legacy IMDS `/v1` endpoints are disabled at the OCI instance level.
 
 ## Prerequisites on the Linux controller
 
@@ -79,15 +203,15 @@ terraform output -raw terraform_csv_report
 
 Terraform itself writes `reports/terraform-resources.csv` after a successful apply. It is a full inventory of the network, Compute node and IPs, Bastion/session/plugin, Autonomous Database/private endpoint, Database Tools connection/private endpoint, and Vault/key/secret identifiers. It excludes passwords, secret contents, wallet contents, and private-key contents. The end-to-end Bash wrapper additionally creates a timestamped execution report in the same directory.
 
-Terraform creates four modules:
-
-- `network`: VCN, private subnet, private route table, NAT Gateway, and SSH-from-VCN security rule.
-- `compute`: Oracle Linux 8 VM with `assign_public_ip = false` and the Cloud Agent Bastion plugin enabled.
-- `bastion`: standard OCI Bastion and, conditionally, a three-hour managed SSH session restricted to the controller CIDR.
-- `autonomous_database`: ECPU Autonomous AI Database, private endpoint, and a dedicated NSG allowing TLS/mTLS port 1522 only from the VCN CIDR.
-- `database_tools`: Database Tools service private endpoint, Vault-backed ADMIN credential, and a connection using the ADB-generated TLS `HIGH` descriptor.
-
-Module dependencies are explicit: Compute waits for Network, Bastion waits for Compute, Autonomous Database waits for Network, and Database Tools waits for Autonomous Database. When `create_bastion_session = true`, Terraform waits for `bastion_plugin_wait_duration`, queries the live Compute Instance Agent status, and blocks the session unless the `Bastion` plugin is `RUNNING`. When false, the wait, test, and session are skipped while the Bastion service remains. The default is `600s` because OCI documents that plugin enablement can take up to 10 minutes.
+The five modules summarized above have explicit dependencies: Compute waits for
+Network, Bastion waits for Compute, Autonomous Database waits for Network, and
+Database Tools waits for Autonomous Database. When
+`create_bastion_session = true`, Terraform waits for
+`bastion_plugin_wait_duration`, queries the live Compute Instance Agent status,
+and blocks the session unless the `Bastion` plugin is `RUNNING`. When false, the
+wait, test, and session are skipped while the Bastion service remains. The
+default is `600s` because OCI documents that plugin enablement can take up to 10
+minutes.
 
 If OCI shows the plugin as **Enabled / Stopped**, apply the updated network and 600-second wait first. If it stays stopped, create an SSH port-forwarding session to the private IP on port 22; unlike managed SSH, port forwarding does not require Oracle Cloud Agent. Use the tunnel to restart and inspect `oracle-cloud-agent` on Linux. Detailed commands are in `terraform/README.md`.
 
