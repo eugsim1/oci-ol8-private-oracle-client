@@ -17,9 +17,32 @@ Database. Load status, SQL*Loader audit data, tag metadata, and restart
 checkpoints make the pipeline suitable for repeatable FinOps processing rather
 than a one-time import.
 
-> This is an independent reference implementation. Review the source, IAM
-> policies, database schema, cost model, and security controls before using it
-> with production billing data.
+## Disclaimer and community use
+
+> **Independent community project:** This repository is not an Oracle product
+> and is not affiliated with, sponsored by, endorsed by, reviewed by, or
+> supported by Oracle Corporation. Use of Oracle product names, OCI service
+> names, documentation links, and architecture icons does not imply Oracle
+> endorsement. Oracle products and services remain subject to their applicable
+> licenses and service terms.
+
+This project is provided as a reference implementation, without warranty or
+official support. Review and test the source, IAM policies, database schema,
+cost model, regional availability, and security controls before using it with
+production systems or billing data. You are responsible for the OCI resources,
+security configuration, and charges created in your tenancy.
+
+The original code and documentation in this repository may be used, copied,
+modified, and redistributed under the [MIT License](LICENSE). That license does
+not grant rights to Oracle software, service content, trademarks, or any other
+third-party component; those remain governed by their respective terms.
+
+If this project helps you, an optional way to support it is to star the
+[GitHub repository](https://github.com/eugsim1/oci-ol8-private-oracle-client)
+and give the related
+[LinkedIn article](https://www.linkedin.com/pulse/building-fast-multi-worker-etl-pipeline-oci-focus-finops-eugene-simos-vbytf/)
+a reaction, comment, or share. Feedback and improvements through GitHub issues
+and pull requests are welcome.
 
 ## Why the platform is private
 
@@ -166,6 +189,7 @@ final FOCUS schema/load workflow.
 │   ├── generate-diagrams.ps1
 │   └── README.md
 ├── reports/                  # generated locally; contents are ignored
+├── LICENSE
 ├── SECURITY.md
 └── SANITIZATION_REPORT.md
 ```

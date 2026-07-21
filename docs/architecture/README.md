@@ -19,6 +19,11 @@ and follow the recommended Region, VCN, subnet, and workload hierarchy. Generic
 boxes are used only for external actors, project-specific software, and logical
 responsibilities that do not map to an OCI service icon.
 
+Use of Oracle's architecture assets and service names is descriptive and does
+not imply that Oracle Corporation sponsors, endorses, reviews, or supports this
+independent community project. See the project root README and license for the
+complete disclaimer and usage terms.
+
 ## Regenerate the editable sources
 
 Download and extract the Draw.io toolkit, then run from the project root:
