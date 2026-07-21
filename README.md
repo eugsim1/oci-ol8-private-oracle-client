@@ -47,12 +47,29 @@ traffic off the public Internet. See
 
 ## Solution architecture
 
+### OCI deployment topology
+
 [![OCI FOCUS private FinOps architecture](docs/architecture/oci-focus-private-finops.png)](docs/architecture/oci-focus-private-finops.drawio)
 
-The PNG above is generated from the editable
-[Draw.io architecture source](docs/architecture/oci-focus-private-finops.drawio).
-The diagram separates the currently deployed platform from the planned Oracle
-Analytics Cloud integration.
+This physical view shows the OCI Region, VCN, private subnet, managed Bastion,
+private Compute host, private Autonomous Database, Database Tools private
+endpoint, Vault, gateways, Object Storage, and the planned private Oracle
+Analytics Cloud path.
+
+### Solution Design Architecture (SDA)
+
+[![FOCUS FinOps Solution Design Architecture](docs/architecture/oci-focus-private-finops-sda.png)](docs/architecture/oci-focus-private-finops-sda.drawio)
+
+The SDA view separates consumers, analytics, data products, ETL/application,
+OCI platform, delivery/operations, and cross-cutting security controls. Solid
+elements are implemented by this project; dashed red elements identify the
+planned Oracle Analytics Cloud phase.
+
+Both PNGs are generated from their linked editable Draw.io sources. They use
+service stencils from Oracle's official
+[OCI Architecture Diagram Toolkit](https://docs.oracle.com/en-us/iaas/Content/General/Reference/graphicsfordiagrams.htm).
+Diagram sources, regeneration instructions, and scope notes are in
+[`docs/architecture`](docs/architecture/README.md).
 
 ### End-to-end data and deployment flow
 
@@ -144,6 +161,9 @@ final FOCUS schema/load workflow.
 ├── docs/architecture/
 │   ├── oci-focus-private-finops.drawio
 │   ├── oci-focus-private-finops.png
+│   ├── oci-focus-private-finops-sda.drawio
+│   ├── oci-focus-private-finops-sda.png
+│   ├── generate-diagrams.ps1
 │   └── README.md
 ├── reports/                  # generated locally; contents are ignored
 ├── SECURITY.md
