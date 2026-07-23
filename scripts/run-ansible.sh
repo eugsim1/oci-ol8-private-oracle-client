@@ -22,6 +22,8 @@ session_enabled="$(tf_output bastion_session_enabled)"
 session_id="$(tf_output bastion_session_id)"
 session_state="$(tf_output bastion_session_state)"
 region="$(tf_output region)"
+terraform_instance_principal_enabled="$(tf_output_optional iam_instance_principal_enabled)"
+terraform_instance_principal_enabled="${terraform_instance_principal_enabled:-false}"
 session_public_key_path="$(tf_output_optional bastion_session_public_key_path)"
 if [[ -n "${ADB_DATABASE_ID:-}" ]]; then
   autonomous_database_id="$ADB_DATABASE_ID"
@@ -57,6 +59,13 @@ fi
   exit 1
 }
 oci_config_source="${OCI_CONFIG_SOURCE:-$HOME/.oci/config}"
+if [[ -n "${OCI_AUTH_MODE:-}" ]]; then
+  oci_auth_mode="$OCI_AUTH_MODE"
+elif [[ "$terraform_instance_principal_enabled" == "true" ]]; then
+  oci_auth_mode="instance_principal"
+else
+  oci_auth_mode="api_key"
+fi
 application_repository_url="${APPLICATION_REPOSITORY_URL:-https://github.com/eugsim1/focus-loader-report-upload.git}"
 application_repository_version="${APPLICATION_REPOSITORY_VERSION:-HEAD}"
 application_repository_destination="${APPLICATION_REPOSITORY_DESTINATION:-/home/oracle/focus-loader-report-upload}"
@@ -70,6 +79,14 @@ oracle_gui_vnc_display="${ORACLE_GUI_VNC_DISPLAY:-1}"
 oracle_gui_vnc_geometry="${ORACLE_GUI_VNC_GEOMETRY:-1280x800}"
 focus_loader_enabled="${FOCUS_LOADER_ENABLED:-false}"
 
+case "$terraform_instance_principal_enabled" in
+  true|false) ;;
+  *) echo "Terraform output iam_instance_principal_enabled must be true or false." >&2; exit 1 ;;
+esac
+case "$oci_auth_mode" in
+  api_key|instance_principal) ;;
+  *) echo "OCI_AUTH_MODE must be api_key or instance_principal." >&2; exit 1 ;;
+esac
 case "$adb_wallet_enabled" in
   true|false) ;;
   *) echo "ADB_WALLET_ENABLED must be true or false." >&2; exit 1 ;;
@@ -167,7 +184,7 @@ if [[ "$focus_loader_enabled" == "true" ]]; then
   export FOCUS_LOADER_DB_PASSWORD="$focus_loader_db_password"
 fi
 
-for generated_value in "$application_repository_url" "$application_repository_version" "$application_repository_destination" "$adb_wallet_archive_path" "$adb_wallet_directory" "$adb_tns_alias" "$oracle_gui_vnc_display" "$oracle_gui_vnc_geometry"; do
+for generated_value in "$oci_auth_mode" "$region" "$application_repository_url" "$application_repository_version" "$application_repository_destination" "$adb_wallet_archive_path" "$adb_wallet_directory" "$adb_tns_alias" "$oracle_gui_vnc_display" "$oracle_gui_vnc_geometry"; do
   [[ "$generated_value" != *$'\n'* && "$generated_value" != *'"'* ]] || {
     echo "Generated Ansible override values must not contain newlines or double quotes." >&2
     exit 1
@@ -179,40 +196,45 @@ done
   echo "Pass it as argument 1 or set SSH_PRIVATE_KEY_PATH." >&2
   exit 1
 }
-[[ -r "$oci_config_source" ]] || {
-  echo "OCI configuration is not readable: $oci_config_source" >&2
-  echo "Set OCI_CONFIG_SOURCE if it is not under \$HOME/.oci/config." >&2
-  exit 1
-}
+oci_private_key_source=""
+oci_private_key_filename=""
+if [[ "$oci_auth_mode" == "api_key" ]]; then
+  [[ -r "$oci_config_source" ]] || {
+    echo "OCI configuration is not readable: $oci_config_source" >&2
+    echo "Set OCI_CONFIG_SOURCE if it is not under \$HOME/.oci/config." >&2
+    exit 1
+  }
 
-oci_private_key_source="${OCI_PRIVATE_KEY_SOURCE:-}"
-if [[ -z "$oci_private_key_source" ]]; then
-  oci_private_key_source="$(
-    awk '
-      /^[[:space:]]*key_file[[:space:]]*=/ {
-        value=$0
-        sub(/^[^=]*=[[:space:]]*/, "", value)
-        sub(/[[:space:]]+$/, "", value)
-        print value
-        exit
-      }
-    ' "$oci_config_source"
-  )"
+  oci_private_key_source="${OCI_PRIVATE_KEY_SOURCE:-}"
+  if [[ -z "$oci_private_key_source" ]]; then
+    oci_private_key_source="$(
+      awk '
+        /^[[:space:]]*key_file[[:space:]]*=/ {
+          value=$0
+          sub(/^[^=]*=[[:space:]]*/, "", value)
+          sub(/[[:space:]]+$/, "", value)
+          print value
+          exit
+        }
+      ' "$oci_config_source"
+    )"
+  fi
+
+  oci_private_key_source="${oci_private_key_source%\"}"
+  oci_private_key_source="${oci_private_key_source#\"}"
+  if [[ "$oci_private_key_source" == "~/"* ]]; then
+    oci_private_key_source="$HOME/${oci_private_key_source#\~/}"
+  elif [[ "$oci_private_key_source" != /* ]]; then
+    oci_private_key_source="$(dirname "$oci_config_source")/$oci_private_key_source"
+  fi
+
+  [[ -r "$oci_private_key_source" ]] || {
+    echo "OCI API private key is not readable: $oci_private_key_source" >&2
+    echo "Correct key_file in $oci_config_source or set OCI_PRIVATE_KEY_SOURCE." >&2
+    exit 1
+  }
+  oci_private_key_filename="$(basename "$oci_private_key_source")"
 fi
-
-oci_private_key_source="${oci_private_key_source%\"}"
-oci_private_key_source="${oci_private_key_source#\"}"
-if [[ "$oci_private_key_source" == "~/"* ]]; then
-  oci_private_key_source="$HOME/${oci_private_key_source#\~/}"
-elif [[ "$oci_private_key_source" != /* ]]; then
-  oci_private_key_source="$(dirname "$oci_config_source")/$oci_private_key_source"
-fi
-
-[[ -r "$oci_private_key_source" ]] || {
-  echo "OCI API private key is not readable: $oci_private_key_source" >&2
-  echo "Correct key_file in $oci_config_source or set OCI_PRIVATE_KEY_SOURCE." >&2
-  exit 1
-}
 
 chmod 600 "$ssh_private_key"
 mkdir -p "$ansible_dir/inventory" "$ansible_dir/group_vars" "$root_dir/reports"
@@ -236,9 +258,11 @@ EOF
 cat > "$ansible_dir/group_vars/all.yml" <<EOF
 ---
 # Generated by scripts/run-ansible.sh. Source files remain on this controller.
+oracle_oci_auth_mode: "$oci_auth_mode"
+oracle_oci_region: "$region"
 oci_config_source: "$oci_config_source"
 oci_private_key_source: "$oci_private_key_source"
-oci_private_key_filename: "$(basename "$oci_private_key_source")"
+oci_private_key_filename: "$oci_private_key_filename"
 oracle_application_repository_url: "$application_repository_url"
 oracle_application_repository_version: "$application_repository_version"
 oracle_application_repository_destination: "$application_repository_destination"
@@ -280,8 +304,13 @@ echo "Generated: $ansible_dir/inventory/hosts.yml"
 echo "Generated: $ansible_dir/group_vars/all.yml"
 echo "Target: oracle@$private_ip through Bastion session $session_id"
 echo "SSH private key: $ssh_private_key"
-echo "OCI config source: $oci_config_source"
-echo "OCI private key source: $oci_private_key_source"
+echo "OCI authentication mode: $oci_auth_mode"
+if [[ "$oci_auth_mode" == "api_key" ]]; then
+  echo "OCI config source: $oci_config_source"
+  echo "OCI private key source: $oci_private_key_source"
+else
+  echo "OCI API config/private key: not copied (instance principal)"
+fi
 echo "Application repository: $application_repository_url ($application_repository_version)"
 echo "Application destination: $application_repository_destination"
 if [[ "$adb_wallet_enabled" == "true" ]]; then

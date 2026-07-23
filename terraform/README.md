@@ -330,3 +330,37 @@ terraform destroy -var-file=terraform.tfvars
 ```
 
 If the VNIC remains after the Autonomous Database has fully terminated, record the returned VNIC and parent-resource OCIDs and open an Oracle Support request rather than force-removing an unknown service-managed attachment.
+
+## Compute instance principal IAM
+
+Set `iam_instance_principal_enabled = true` and supply the root `tenancy_id` to
+create an exact-instance dynamic group for `module.compute.instance_id`. OCI
+requires that dynamic group to be a tenancy-level IAM resource; it cannot be
+placed in the Compute compartment. The module does place the corresponding
+policy in `compartment_id`, and all generated statements are scoped to that
+compartment.
+
+```hcl
+tenancy_id                     = "ocid1.tenancy.oc1..aaaa..."
+iam_instance_principal_enabled = true
+iam_instance_principal_compartment_permissions = [
+  "read autonomous-database-family",
+]
+iam_instance_principal_match_all_instances_in_compartment = false
+```
+
+Verify the mandatory placement split:
+
+```bash
+terraform output -raw iam_dynamic_group_compartment_id
+terraform output -raw iam_policy_compartment_id
+terraform output -raw iam_dynamic_group_matching_rule
+terraform output -json iam_policy_statements
+```
+
+The first value must equal `tenancy_id`; the second must equal
+`compartment_id`. The normal `resource_compartment_ids` invariant includes the
+compartment policy and intentionally excludes the tenancy-level dynamic group.
+See [Compute instance principal IAM](../docs/instance-principal.md) for
+permissions, Ansible integration, verification, propagation behavior, and
+security guidance.

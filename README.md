@@ -10,6 +10,8 @@ project, installs its Go and Oracle runtime dependencies, creates the target
 database schema, downloads the Autonomous Database wallet, and verifies the
 private database connection.
 
+**Latest release documented here: `v1.2.0` (2026-07-23).**
+
 The deployed utility reads OCI FOCUS cost-report objects from Object Storage,
 processes multiple gzip CSV files concurrently, enriches and normalizes the
 FOCUS rows, produces SQL*Loader-ready data, and loads it into an Autonomous AI
@@ -306,7 +308,11 @@ cp inventory/hosts.yml.example inventory/hosts.yml
 cp group_vars/all.yml.example group_vars/all.yml
 ```
 
-Replace the private IP, session OCID, region, and SSH private-key path in `inventory/hosts.yml`. Configure the local OCI config/API-key paths in `group_vars/all.yml`. Instant Client defaults to the Oracle 26ai DNF release channel, with Basic, Tools/SQL*Loader, and SQL*Plus packages.
+Replace the private IP, session OCID, region, and SSH private-key path in
+`inventory/hosts.yml`. Configure `oracle_oci_auth_mode` and
+`oracle_oci_region` in `group_vars/all.yml`; local OCI config/API-key paths are
+needed only for legacy `api_key` mode. Instant Client defaults to the Oracle
+26ai DNF release channel, with Basic, Tools/SQL*Loader, and SQL*Plus packages.
 
 Then run:
 
@@ -317,7 +323,14 @@ ansible-playbook -i inventory/hosts.yml site.yml --syntax-check
 ansible-playbook -i inventory/hosts.yml site.yml
 ```
 
-Ansible waits for the managed SSH path, connects directly as `oracle`, confirms its local OCI credential source files exist, installs Python/OCI CLI/Git/Instant Client, configures `/home/oracle/.oci` with secure permissions, downloads and configures the Autonomous Database wallet, and clones `https://github.com/eugsim1/focus-loader-report-upload.git` into `/home/oracle/focus-loader-report-upload` as the `oracle` user. `oci_config_source` and `oci_private_key_source` are paths on the Ansible controller; both files are copied to the server with mode `0600`.
+Ansible waits for the managed SSH path, connects directly as `oracle`, installs
+Python/OCI CLI/Git/Instant Client, downloads and configures the Autonomous
+Database wallet, and clones
+`https://github.com/eugsim1/focus-loader-report-upload.git` into
+`/home/oracle/focus-loader-report-upload`. In instance-principal mode it does
+not require or copy user API credentials. In legacy API-key mode it verifies
+the controller's `oci_config_source` and `oci_private_key_source`, creates
+`/home/oracle/.oci` securely, and copies both files with mode `0600`.
 
 ## One-command Linux deployment and report
 
@@ -335,7 +348,13 @@ chmod +x scripts/deploy.sh scripts/run-ansible.sh scripts/renew-bastion-session.
 ./scripts/deploy.sh terraform.tfvars
 ```
 
-After Terraform succeeds, the wrapper derives the SSH private-key path from the Terraform session public-key path, reads the controller's `$HOME/.oci/config`, discovers its `key_file`, generates the complete Ansible inventory and group variables, and runs Ansible through OCI Bastion. No placeholder substitution is required.
+After Terraform succeeds, the wrapper derives the SSH private-key path from
+the Terraform session public-key path, generates the complete Ansible inventory
+and group variables, and runs Ansible through OCI Bastion. If
+`iam_instance_principal_enabled` is true it selects instance-principal
+authentication automatically. Otherwise it reads the controller's
+`$HOME/.oci/config` and discovers its `key_file`. No placeholder substitution
+is required.
 
 If the matching SSH private key cannot be derived by removing `.pub`, pass its path as argument 2:
 
@@ -361,7 +380,16 @@ ANSIBLE_VERBOSITY=3 \
 
 The same `APPLICATION_REPOSITORY_*` variables can be supplied to `scripts/run-ansible.sh`. `APPLICATION_REPOSITORY_VERSION` accepts a branch, tag, or commit and defaults to `HEAD`. The repository must be reachable by the target server through its NAT Gateway. The clone is idempotent, updates on later runs, preserves local modifications, and runs as `oracle`. After cloning, Ansible uses `git rev-parse --show-toplevel` on the target to verify and print the repository's full Linux installation path. The core role also installs Go 1.21 or newer, creates `/home/oracle/go/bin`, configures `GOROOT`, `GOPATH`, and `PATH` through `/etc/profile.d/go.sh`, and prints the verified Go installation details as `oracle`.
 
-Wallet deployment is enabled by default. The runner reads the Autonomous Database OCID directly from Terraform output, downloads `/home/oracle/Wallet_AutonomousDatabase.zip`, extracts it securely to `/home/oracle/adb_wallet`, replaces `?/network/admin` in `sqlnet.ora` with that absolute directory, and configures `TNS_ADMIN` in both `/etc/environment` and `/etc/profile.d/oracle-adb-wallet.sh`. Supply `ADB_WALLET_PASSWORD`; when the end-to-end deployment wrapper is used, it falls back to `TF_VAR_adb_admin_password`. Use a separate strong wallet password in production. Set `ADB_WALLET_ENABLED=false` to skip wallet deployment. The OCI identity in `/home/oracle/.oci/config` must be authorized to generate an Autonomous Database wallet.
+Wallet deployment is enabled by default. The runner reads the Autonomous
+Database OCID directly from Terraform output, downloads
+`/home/oracle/Wallet_AutonomousDatabase.zip`, extracts it securely to
+`/home/oracle/adb_wallet`, replaces `?/network/admin` in `sqlnet.ora` with that
+absolute directory, and configures `TNS_ADMIN`. Supply `ADB_WALLET_PASSWORD`;
+when the end-to-end deployment wrapper is used, it falls back to
+`TF_VAR_adb_admin_password`. Use a separate strong wallet password in
+production. Set `ADB_WALLET_ENABLED=false` to skip wallet deployment. The
+selected OCI identity—instance principal or API-key profile—must be authorized
+to inspect the database and generate its wallet.
 
 After Instant Client installation, Ansible installs and runs `/home/oracle/test_adb/test_adb_connection.sh`. The script finds the first `_high` alias in the wallet's `tnsnames.ora`, connects with SQLPlus as `ADMIN`, and prints the connected user, database, service, instance, timestamp, and exit status. The ADMIN password is read from `ADB_ADMIN_PASSWORD`, falling back to `TF_VAR_adb_admin_password`; it is neither stored in the script nor printed. Results remain in `/home/oracle/test_adb/last_test_result.txt`. Override the alias with `ADB_TNS_ALIAS=database_high`, or disable the test with `ADB_TEST_ENABLED=false`.
 
@@ -547,3 +575,126 @@ OCI compartments safe and auditable:
 
 The original pre-update code remains available in the
 [`v1.0.0` release](https://github.com/eugsim1/oci-ol8-private-oracle-client/releases/tag/v1.0.0).
+
+## v1.2.0 latest changes
+
+Released on 2026-07-23, this update adds optional Compute instance-principal
+authentication while retaining API-key authentication for backward
+compatibility. Existing deployments are unchanged until
+`iam_instance_principal_enabled` is set to `true`.
+
+### Terraform IAM resources and placement
+
+The project now includes `terraform/modules/iam_instance_principal`, which
+creates a dynamic group matching the current Compute instance and a
+least-privilege IAM policy for it.
+
+OCI does **not** allow the dynamic group itself to be deployed into the Compute
+compartment. It is a root-tenancy IAM resource and therefore requires
+`tenancy_id`. The related policy is deployed into the `compartment_id` supplied
+through `terraform.tfvars`, so its grants remain scoped to the Compute
+compartment and descendants.
+
+The default rule matches the exact instance OCID:
+
+```text
+instance.id = '<module.compute.instance_id>'
+```
+
+The security-sensitive
+`iam_instance_principal_match_all_instances_in_compartment = true` option is
+available for fleets, but is disabled by default because it grants the same
+principal permissions to every Compute instance in the compartment.
+
+### Configuration
+
+Enable exact-instance authentication with:
+
+```hcl
+tenancy_id                     = "ocid1.tenancy.oc1..aaaa..."
+iam_instance_principal_enabled = true
+iam_instance_principal_compartment_permissions = [
+  "read autonomous-database-family",
+]
+iam_instance_principal_match_all_instances_in_compartment = false
+```
+
+`read autonomous-database-family` is the least-privilege default used to inspect
+the Terraform-created Autonomous Database and generate its wallet. Optional
+permission fragments such as `read object-family` and `read secret-bundles`
+must be added only when the workload needs Object Storage or Vault secret
+access.
+
+The identity applying Terraform must be authorized to manage dynamic groups at
+the tenancy root and policies in the target Compute compartment.
+
+### Automation behavior
+
+When IAM is enabled, `scripts/run-ansible.sh`:
+
+- reads `iam_instance_principal_enabled` and the OCI region from Terraform;
+- selects `oracle_oci_auth_mode: instance_principal` automatically;
+- does not require or copy the controller's OCI API config/private key;
+- passes `--auth instance_principal` to OCI CLI database and wallet commands;
+- configures `OCI_CLI_AUTH=instance_principal` for interactive `oracle`
+  sessions; and
+- passes `-ip` to the FOCUS loader.
+
+When the feature is disabled, the existing API-key workflow continues to use
+`/home/oracle/.oci/config`. `OCI_AUTH_MODE=api_key` or
+`OCI_AUTH_MODE=instance_principal` can explicitly override automatic selection
+when equivalent external credentials or IAM already exist.
+
+### New verification outputs and report fields
+
+Terraform now exposes:
+
+```bash
+terraform output -raw iam_instance_principal_enabled
+terraform output -raw iam_dynamic_group_id
+terraform output -raw iam_dynamic_group_name
+terraform output -raw iam_dynamic_group_compartment_id
+terraform output -raw iam_dynamic_group_matching_rule
+terraform output -raw iam_policy_id
+terraform output -raw iam_policy_name
+terraform output -raw iam_policy_compartment_id
+terraform output -json iam_policy_statements
+```
+
+The generated CSV infrastructure report records the dynamic group, matching
+rule, policy, policy compartment, and statements. The existing
+`resource_compartment_ids` placement invariant includes the compartment policy
+but intentionally excludes the tenancy-level dynamic group.
+
+### Upgrade and validation
+
+After adding `tenancy_id` and enabling the feature, run:
+
+```bash
+cd terraform
+terraform fmt -recursive
+terraform init
+terraform validate
+terraform plan -var-file=terraform.tfvars -out=tfplan
+terraform apply tfplan
+```
+
+Allow OCI IAM changes time to propagate before testing from the Compute node:
+
+```bash
+oci db autonomous-database get \
+  --auth instance_principal \
+  --region eu-frankfurt-1 \
+  --autonomous-database-id ocid1.autonomousdatabase...
+```
+
+This release was statically verified with Oracle OCI Terraform provider
+`8.24.0`, Terraform validation, Bash syntax checks, and YAML/Jinja parsing of
+the Ansible configuration.
+
+Review the full setup, output checks, verification commands, optional Object
+Storage/Vault permissions, cross-compartment limitation, and security notes in
+[Compute instance principal IAM](docs/instance-principal.md).
+
+The previous compartment-safe implementation remains available in the
+[`v1.1.0` release](https://github.com/eugsim1/oci-ol8-private-oracle-client/releases/tag/v1.1.0).

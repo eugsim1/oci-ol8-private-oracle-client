@@ -15,6 +15,19 @@ locals {
     substr(upper(var.adb_db_name), 0, 30 - length(local.immutable_name_suffix)),
     upper(local.immutable_name_suffix)
   ) : upper(var.adb_db_name)
+  iam_name_base = substr(
+    "ip-${replace(lower(var.compute_node_name), "/[^a-z0-9_-]/", "-")}-${lower(local.immutable_name_suffix)}",
+    0,
+    90
+  )
+  effective_iam_dynamic_group_name = coalesce(
+    var.iam_instance_principal_dynamic_group_name,
+    "${local.iam_name_base}-dg"
+  )
+  effective_iam_policy_name = coalesce(
+    var.iam_instance_principal_policy_name,
+    "${local.iam_name_base}-policy"
+  )
 
   ssh_public_key_content = trimspace(file(pathexpand(var.ssh_public_key_path)))
   bastion_session_public_key_path = pathexpand(
@@ -50,6 +63,27 @@ module "compute" {
   ssh_public_key_content  = local.ssh_public_key_content
 
   depends_on = [module.network]
+}
+
+module "iam_instance_principal" {
+  count  = var.iam_instance_principal_enabled ? 1 : 0
+  source = "./modules/iam_instance_principal"
+
+  # OCI requires a dynamic group to be a root-tenancy IAM resource.
+  tenancy_id             = coalesce(var.tenancy_id, "ocid1.tenancy.oc1..disabled")
+  compute_compartment_id = local.target_compartment_id
+  policy_compartment_id  = local.target_compartment_id
+  instance_id            = module.compute.instance_id
+
+  dynamic_group_name        = local.effective_iam_dynamic_group_name
+  dynamic_group_description = "Instance principal for ${module.compute.instance_name} (${module.compute.instance_id})"
+  policy_name               = local.effective_iam_policy_name
+  policy_description        = "Least-privilege permissions for ${module.compute.instance_name} instance principal"
+
+  match_all_instances_in_compartment = var.iam_instance_principal_match_all_instances_in_compartment
+  compartment_permissions            = var.iam_instance_principal_compartment_permissions
+
+  depends_on = [module.compute]
 }
 
 module "bastion" {
@@ -116,10 +150,18 @@ locals {
   created_resource_compartment_ids = distinct(concat(
     module.network.resource_compartment_ids,
     module.compute.resource_compartment_ids,
+    var.iam_instance_principal_enabled ? module.iam_instance_principal[0].policy_resource_compartment_ids : [],
     module.bastion.resource_compartment_ids,
     module.autonomous_database.resource_compartment_ids,
     module.database_tools.resource_compartment_ids
   ))
+}
+
+check "instance_principal_requires_tenancy_id" {
+  assert {
+    condition     = !var.iam_instance_principal_enabled || var.tenancy_id != null
+    error_message = "tenancy_id is required when iam_instance_principal_enabled is true because OCI dynamic groups are tenancy-level IAM resources."
+  }
 }
 
 check "all_created_resources_use_target_compartment" {
@@ -128,6 +170,6 @@ check "all_created_resources_use_target_compartment" {
       for compartment_id in local.created_resource_compartment_ids :
       compartment_id == local.target_compartment_id
     ])
-    error_message = "At least one Terraform-created resource is outside compartment_id. Inspect the resource_compartment_ids output before continuing."
+    error_message = "At least one compartment-scoped Terraform resource is outside compartment_id. The tenancy-level dynamic group is intentionally excluded; inspect resource_compartment_ids before continuing."
   }
 }

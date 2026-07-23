@@ -46,6 +46,9 @@ oracle_adb_wallet_password: >-
 oracle_adb_wallet_generate_type: "SINGLE"
 oracle_adb_wallet_archive_path: "/home/oracle/Wallet_AutonomousDatabase.zip"
 oracle_adb_wallet_directory: "/home/oracle/adb_wallet"
+# instance_principal avoids copying user API credentials to the Compute node.
+oracle_oci_auth_mode: "instance_principal"
+oracle_oci_region: "eu-frankfurt-1"
 oracle_oci_profile: "DEFAULT"
 oracle_adb_test_enabled: true
 oracle_adb_admin_password: >-
@@ -64,6 +67,7 @@ oracle_gui_vnc_display: 1
 oracle_gui_vnc_geometry: "1280x800"
 oracle_gui_vnc_password: "{{ lookup('ansible.builtin.env', 'ORACLE_VNC_PASSWORD') }}"
 oracle_gui_vnc_port: "{{ 5900 + (oracle_gui_vnc_display | int) }}"
-oci_config_source: "/home/admin/.oci/config"
-oci_private_key_source: "/home/admin/.oci/oci_api_key.pem"
-oci_private_key_filename: "oci_api_key.pem"
+# Required only when oracle_oci_auth_mode is api_key.
+oci_config_source: ""
+oci_private_key_source: ""
+oci_private_key_filename: ""

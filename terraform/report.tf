@@ -23,6 +23,14 @@ locals {
     { resource_type = "compute", resource_name = module.compute.instance_name, attribute = "public_ip", value = coalesce(module.compute.public_ip, "none") },
     { resource_type = "compute", resource_name = module.compute.instance_name, attribute = "imds_v2_only", value = tostring(module.compute.imds_v2_only) },
 
+    { resource_type = "iam_instance_principal", resource_name = local.effective_iam_dynamic_group_name, attribute = "enabled", value = tostring(var.iam_instance_principal_enabled) },
+    { resource_type = "iam_dynamic_group", resource_name = local.effective_iam_dynamic_group_name, attribute = "id", value = coalesce(try(module.iam_instance_principal[0].dynamic_group_id, null), "not created") },
+    { resource_type = "iam_dynamic_group", resource_name = local.effective_iam_dynamic_group_name, attribute = "compartment_id", value = coalesce(try(module.iam_instance_principal[0].dynamic_group_compartment_id, null), "not created") },
+    { resource_type = "iam_dynamic_group", resource_name = local.effective_iam_dynamic_group_name, attribute = "matching_rule", value = coalesce(try(module.iam_instance_principal[0].dynamic_group_matching_rule, null), "not created") },
+    { resource_type = "iam_policy", resource_name = local.effective_iam_policy_name, attribute = "id", value = coalesce(try(module.iam_instance_principal[0].policy_id, null), "not created") },
+    { resource_type = "iam_policy", resource_name = local.effective_iam_policy_name, attribute = "compartment_id", value = coalesce(try(module.iam_instance_principal[0].policy_compartment_id, null), "not created") },
+    { resource_type = "iam_policy", resource_name = local.effective_iam_policy_name, attribute = "statements", value = var.iam_instance_principal_enabled ? join(" | ", module.iam_instance_principal[0].policy_statements) : "not created" },
+
     { resource_type = "bastion", resource_name = module.bastion.bastion_name, attribute = "id", value = module.bastion.bastion_id },
     { resource_type = "bastion", resource_name = module.bastion.bastion_name, attribute = "state", value = module.bastion.bastion_state },
     { resource_type = "bastion", resource_name = module.bastion.bastion_name, attribute = "private_endpoint_ip", value = module.bastion.bastion_private_endpoint_ip },

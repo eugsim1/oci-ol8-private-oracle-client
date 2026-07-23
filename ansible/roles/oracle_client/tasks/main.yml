@@ -1,16 +1,26 @@
 ---
+- name: Validate OCI authentication mode
+  ansible.builtin.assert:
+    that:
+      - oracle_oci_auth_mode in ['api_key', 'instance_principal']
+      - oracle_oci_auth_mode != 'instance_principal' or oracle_oci_region | trim | length > 0
+    fail_msg: >-
+      oracle_oci_auth_mode must be api_key or instance_principal. Instance-principal
+      mode also requires oracle_oci_region.
 - name: Check local OCI CLI configuration file
   ansible.builtin.stat:
     path: "{{ oci_config_source }}"
   delegate_to: localhost
   become: false
   register: local_oci_config
+  when: oracle_oci_auth_mode == 'api_key'
 - name: Check local OCI API private key
   ansible.builtin.stat:
     path: "{{ oci_private_key_source }}"
   delegate_to: localhost
   become: false
   register: local_oci_private_key
+  when: oracle_oci_auth_mode == 'api_key'
 - name: Require local OCI credential files
   ansible.builtin.assert:
     that:
@@ -21,6 +31,7 @@
     fail_msg: "Set oci_config_source and oci_private_key_source to readable files on the Ansible controller."
   delegate_to: localhost
   become: false
+  when: oracle_oci_auth_mode == 'api_key'
 - name: Require Oracle Linux 8.10 or newer for Python 3.12
   ansible.builtin.assert:
     that:
@@ -178,6 +189,7 @@
     group: oracle
     mode: "0600"
   no_log: true
+  when: oracle_oci_auth_mode == 'api_key'
 - name: Copy OCI CLI configuration
   ansible.builtin.copy:
     src: "{{ oci_config_source }}"
@@ -186,12 +198,28 @@
     group: oracle
     mode: "0600"
   no_log: true
+  when: oracle_oci_auth_mode == 'api_key'
 - name: Point OCI profiles to the copied key
   ansible.builtin.replace:
     path: /home/oracle/.oci/config
     regexp: '^key_file\s*=.*$'
     replace: 'key_file=/home/oracle/.oci/{{ oci_private_key_filename }}'
   no_log: true
+  when: oracle_oci_auth_mode == 'api_key'
+- name: Configure OCI CLI authentication environment
+  ansible.builtin.copy:
+    content: |
+      # Managed by Ansible.
+      {% if oracle_oci_auth_mode == 'instance_principal' %}
+      export OCI_CLI_AUTH=instance_principal
+      export OCI_CLI_REGION="{{ oracle_oci_region }}"
+      {% else %}
+      # API-key authentication uses /home/oracle/.oci/config.
+      {% endif %}
+    dest: /etc/profile.d/oci-auth.sh
+    owner: root
+    group: root
+    mode: "0644"
 - name: Initialize graphical desktop provisioning status
   ansible.builtin.set_fact:
     oracle_gui_provisioning_status: "{{ 'pending' if oracle_gui_enabled | bool else 'skipped' }}"
@@ -311,7 +339,9 @@
     msg:
       - "Wallet deployment enabled: {{ oracle_adb_wallet_enabled | bool }}"
       - "Autonomous Database OCID: {{ oracle_adb_wallet_database_id }}"
-      - "OCI profile: {{ oracle_oci_profile }}"
+      - "OCI authentication: {{ oracle_oci_auth_mode }}"
+      - "OCI profile: {{ oracle_oci_profile if oracle_oci_auth_mode == 'api_key' else 'not used' }}"
+      - "OCI region: {{ oracle_oci_region }}"
       - "Wallet type: {{ oracle_adb_wallet_generate_type }}"
       - "Wallet archive: {{ oracle_adb_wallet_archive_path }}"
       - "Wallet installation directory: {{ oracle_adb_wallet_directory }}"
@@ -337,21 +367,25 @@
       Wallet settings validated. Installation directory:
       {{ oracle_adb_wallet_directory }}
   when: oracle_adb_wallet_enabled | bool
+- name: Assemble OCI CLI authentication arguments
+  ansible.builtin.set_fact:
+    oracle_oci_cli_auth_argv: >-
+      {{
+        ['--auth', 'instance_principal', '--region', oracle_oci_region]
+        if oracle_oci_auth_mode == 'instance_principal'
+        else ['--config-file', '/home/oracle/.oci/config', '--profile', oracle_oci_profile]
+      }}
+  when: oracle_adb_wallet_enabled | bool
 - name: Get Autonomous Database details with OCI CLI
   ansible.builtin.command:
-    argv:
-      - /usr/local/bin/oci
-      - db
-      - autonomous-database
-      - get
-      - --autonomous-database-id
-      - "{{ oracle_adb_wallet_database_id }}"
-      - --config-file
-      - /home/oracle/.oci/config
-      - --profile
-      - "{{ oracle_oci_profile }}"
-      - --output
-      - json
+    argv: >-
+      {{
+        ['/usr/local/bin/oci',
+         'db', 'autonomous-database', 'get',
+         '--autonomous-database-id', oracle_adb_wallet_database_id] +
+        oracle_oci_cli_auth_argv +
+        ['--output', 'json']
+      }}
   become: true
   become_user: oracle
   environment:
@@ -376,7 +410,7 @@
       - oracle_adb_oci_get_result.stdout | length > 0
     fail_msg: >-
       OCI CLI could not retrieve the Autonomous Database. Check the OCID, region,
-      OCI profile, copied API key, IAM policy, and the full OCI output printed above.
+      selected authentication mode, IAM policy, and the full OCI output printed above.
     success_msg: >-
       OCI CLI successfully retrieved Autonomous Database
       {{ oracle_adb_wallet_database_id }}.
@@ -391,23 +425,16 @@
   when: oracle_adb_wallet_enabled | bool
 - name: Download Autonomous Database wallet with OCI CLI
   ansible.builtin.command:
-    argv:
-      - /usr/local/bin/oci
-      - db
-      - autonomous-database
-      - generate-wallet
-      - --autonomous-database-id
-      - "{{ oracle_adb_wallet_database_id }}"
-      - --file
-      - "{{ oracle_adb_wallet_archive_path }}"
-      - --password
-      - "{{ oracle_adb_wallet_password }}"
-      - --generate-type
-      - "{{ oracle_adb_wallet_generate_type }}"
-      - --config-file
-      - /home/oracle/.oci/config
-      - --profile
-      - "{{ oracle_oci_profile }}"
+    argv: >-
+      {{
+        ['/usr/local/bin/oci',
+         'db', 'autonomous-database', 'generate-wallet',
+         '--autonomous-database-id', oracle_adb_wallet_database_id,
+         '--file', oracle_adb_wallet_archive_path,
+         '--password', oracle_adb_wallet_password,
+         '--generate-type', oracle_adb_wallet_generate_type] +
+        oracle_oci_cli_auth_argv
+      }}
     creates: "{{ oracle_adb_wallet_archive_path }}"
   become: true
   become_user: oracle
@@ -721,7 +748,7 @@
     dest: /etc/profile.d/oracle-instantclient.sh
     mode: "0644"
 - name: Verify OCI CLI as oracle
-  ansible.builtin.command: /usr/local/bin/oci --config-file /home/oracle/.oci/config --version
+  ansible.builtin.command: /usr/local/bin/oci --version
   become_user: oracle
   changed_when: false
   register: oci_cli_version
@@ -866,7 +893,12 @@
           | regex_search('SQL\\*Loader: Release[^\\r\\n]*'))
           | default('installed', true)
         }}
-      - "OCI configuration: /home/oracle/.oci/config"
+      - >-
+        OCI authentication: {{
+          'instance principal'
+          if oracle_oci_auth_mode == 'instance_principal'
+          else '/home/oracle/.oci/config (' + oracle_oci_profile + ')'
+        }}
       - "Instant Client bin: {{ instant_client_bin.stdout }}"
       - "Instant Client lib: {{ instant_client_lib.stdout }}"
       - "TNS_ADMIN: {{ oracle_adb_wallet_directory if oracle_adb_wallet_enabled | bool else 'not configured' }}"

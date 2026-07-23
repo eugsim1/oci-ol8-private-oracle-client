@@ -1,5 +1,23 @@
 region                      = "eu-paris-1"
 compartment_id              = "ocid1.compartment.oc1..example"
+# Required only when instance-principal IAM is enabled. OCI dynamic groups are
+# tenancy-level even though this stack creates their policy in compartment_id.
+tenancy_id = "ocid1.tenancy.oc1..example"
+
+# Match the single Compute instance created by this stack. The default permission
+# lets the node inspect the ADB and generate its wallet in compartment_id.
+iam_instance_principal_enabled = true
+iam_instance_principal_compartment_permissions = [
+  "read autonomous-database-family",
+  # Optional; uncomment only when the workload needs these services:
+  # "read object-family",
+  # "read secret-bundles",
+]
+# Security-sensitive: true admits every Compute instance in compartment_id.
+iam_instance_principal_match_all_instances_in_compartment = false
+# iam_instance_principal_dynamic_group_name = "custom-instance-principal-dg"
+# iam_instance_principal_policy_name        = "custom-instance-principal-policy"
+
 # Keep this enabled when the same stack is deployed in more than one compartment.
 # It prevents tenancy/region-wide ADB db_name collisions and Bastion name conflicts.
 append_compartment_suffix_to_immutable_names = true

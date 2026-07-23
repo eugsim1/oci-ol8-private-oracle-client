@@ -5,8 +5,37 @@ output "target_compartment_id" {
   value       = local.target_compartment_id
 }
 output "resource_compartment_ids" {
-  description = "Distinct compartment OCIDs reported by all Terraform-created resources; this must contain only target_compartment_id."
+  description = "Distinct compartment OCIDs reported by compartment-scoped resources; this must contain only target_compartment_id. The tenancy-level dynamic group is excluded."
   value       = local.created_resource_compartment_ids
+}
+output "iam_instance_principal_enabled" {
+  value = var.iam_instance_principal_enabled
+}
+output "iam_dynamic_group_id" {
+  value = try(module.iam_instance_principal[0].dynamic_group_id, null)
+}
+output "iam_dynamic_group_name" {
+  value = try(module.iam_instance_principal[0].dynamic_group_name, null)
+}
+output "iam_dynamic_group_matching_rule" {
+  value = try(module.iam_instance_principal[0].dynamic_group_matching_rule, null)
+}
+output "iam_dynamic_group_compartment_id" {
+  description = "Root tenancy OCID when instance principal IAM is enabled."
+  value       = try(module.iam_instance_principal[0].dynamic_group_compartment_id, null)
+}
+output "iam_policy_id" {
+  value = try(module.iam_instance_principal[0].policy_id, null)
+}
+output "iam_policy_name" {
+  value = try(module.iam_instance_principal[0].policy_name, null)
+}
+output "iam_policy_statements" {
+  value = try(module.iam_instance_principal[0].policy_statements, [])
+}
+output "iam_policy_compartment_id" {
+  description = "The Compute compartment OCID when instance principal IAM is enabled."
+  value       = try(module.iam_instance_principal[0].policy_compartment_id, null)
 }
 output "terraform_workspace" { value = terraform.workspace }
 output "immutable_name_suffix" { value = local.immutable_name_suffix }

@@ -47,7 +47,10 @@ Use `RUN_ANSIBLE_AFTER_RENEWAL=false` to create the new session without running
 the playbook immediately. A later `./scripts/run-ansible.sh` invocation will
 regenerate the inventory before connecting.
 
-The script reads `private_ip`, region, Bastion session OCID/state, and the session public-key path directly from Terraform outputs. It derives the matching SSH private-key path by removing `.pub`, reads `$HOME/.oci/config`, discovers its first `key_file=`, and generates both files automatically:
+The script reads `private_ip`, region, Bastion session OCID/state, the session
+public-key path, and `iam_instance_principal_enabled` directly from Terraform
+outputs. It derives the matching SSH private-key path by removing `.pub` and
+generates both files automatically:
 
 ```text
 ansible/inventory/hosts.yml
@@ -56,7 +59,13 @@ ansible/group_vars/all.yml
 
 It then installs the required collection, displays the parsed inventory, waits for SSH, performs a syntax check, and runs the playbook with verbosity level 2. Output is also saved under `reports/ansible-run-<UTC timestamp>.log`.
 
-No arguments are required when these conventions are used:
+When Terraform instance-principal IAM is enabled, the script does not require
+or copy a user OCI config/API key. OCI CLI wallet operations use
+`--auth instance_principal`, and the FOCUS loader uses `-ip`.
+
+When it is disabled, the legacy API-key mode remains available. In that mode
+the runner reads `$HOME/.oci/config`, discovers its first `key_file=`, and uses
+these conventions:
 
 ```text
 session key:  /home/oracle/.ssh/key_name.pub
@@ -73,6 +82,14 @@ OCI_CONFIG_SOURCE=/secure/oci/config \
 OCI_PRIVATE_KEY_SOURCE=/secure/oci/api_key.pem \
 ANSIBLE_VERBOSITY=3 \
 ./scripts/run-ansible.sh
+```
+
+Force a mode only when the corresponding IAM or credential configuration
+already exists:
+
+```bash
+OCI_AUTH_MODE=instance_principal ./scripts/run-ansible.sh
+OCI_AUTH_MODE=api_key ./scripts/run-ansible.sh
 ```
 
 The SSH private key can alternatively be argument 1:
@@ -98,15 +115,32 @@ terraform output -raw region
 terraform output -raw bastion_ssh_command
 ```
 
-Put the private IP, session OCID, region, and local SSH private-key path in `inventory/hosts.yml`. Keep `ansible_user: oracle`. Put the local OCI config/API-key paths in `group_vars/all.yml`:
+Put the private IP, session OCID, region, and local SSH private-key path in
+`inventory/hosts.yml`. Keep `ansible_user: oracle`. For instance-principal
+authentication, put this in `group_vars/all.yml`:
 
 ```yaml
+oracle_oci_auth_mode: "instance_principal"
+oracle_oci_region: "eu-frankfurt-1"
+oci_config_source: ""
+oci_private_key_source: ""
+oci_private_key_filename: ""
+```
+
+For legacy API-key authentication, use:
+
+```yaml
+oracle_oci_auth_mode: "api_key"
+oracle_oci_region: "eu-frankfurt-1"
 oci_config_source: "/home/admin/.oci/config"
 oci_private_key_source: "/home/admin/.oci/oci_api_key.pem"
 oci_private_key_filename: "oci_api_key.pem"
 ```
 
-The role verifies these controller files before provisioning, creates `/home/oracle/.oci` with mode `0700`, copies both files with mode `0600`, and rewrites `key_file=` in the copied config to `/home/oracle/.oci/oci_api_key.pem`.
+Only API-key mode verifies and copies the controller files. The role creates
+`/home/oracle/.oci` with mode `0700`, copies both files with mode `0600`, and
+rewrites `key_file=` in the copied config. Instance-principal mode creates
+`/etc/profile.d/oci-auth.sh` and does not copy user credentials.
 
 By default, the role uses the configured OCI CLI credentials to download the Terraform-created Autonomous Database wallet to `/home/oracle/Wallet_AutonomousDatabase.zip`, extracts it into `/home/oracle/adb_wallet`, updates `sqlnet.ora` with that absolute path, and configures `TNS_ADMIN`. The generated inventory runner supplies the database OCID automatically. Export the wallet password before running Ansible:
 

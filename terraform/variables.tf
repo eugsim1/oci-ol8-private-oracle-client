@@ -8,6 +8,65 @@ variable "compartment_id" {
     error_message = "compartment_id must be an OCI compartment or tenancy OCID."
   }
 }
+variable "tenancy_id" {
+  type        = string
+  default     = null
+  nullable    = true
+  description = "Root tenancy OCID used only for tenancy-level IAM resources. Required when iam_instance_principal_enabled is true."
+
+  validation {
+    condition     = var.tenancy_id == null ? true : can(regex("^ocid1\\.tenancy\\.", var.tenancy_id))
+    error_message = "tenancy_id must be null or an OCI tenancy OCID."
+  }
+}
+variable "iam_instance_principal_enabled" {
+  type        = bool
+  default     = false
+  description = "Create a tenancy-level dynamic group for the Compute node and a least-privilege policy in compartment_id."
+}
+variable "iam_instance_principal_dynamic_group_name" {
+  type        = string
+  default     = null
+  nullable    = true
+  description = "Optional tenancy-unique dynamic-group name. Null derives a stable compartment-suffixed name."
+
+  validation {
+    condition     = var.iam_instance_principal_dynamic_group_name == null ? true : can(regex("^[A-Za-z][A-Za-z0-9_-]{0,99}$", var.iam_instance_principal_dynamic_group_name))
+    error_message = "iam_instance_principal_dynamic_group_name must be null or a valid 1-100 character IAM name."
+  }
+}
+variable "iam_instance_principal_policy_name" {
+  type        = string
+  default     = null
+  nullable    = true
+  description = "Optional IAM policy name. Null derives a stable compartment-suffixed name."
+
+  validation {
+    condition     = var.iam_instance_principal_policy_name == null ? true : can(regex("^[A-Za-z][A-Za-z0-9_-]{0,99}$", var.iam_instance_principal_policy_name))
+    error_message = "iam_instance_principal_policy_name must be null or a valid 1-100 character IAM name."
+  }
+}
+variable "iam_instance_principal_match_all_instances_in_compartment" {
+  type        = bool
+  default     = false
+  description = "Security-sensitive opt-in: match every Compute instance in compartment_id instead of only the instance created by this stack."
+}
+variable "iam_instance_principal_compartment_permissions" {
+  type        = list(string)
+  default     = ["read autonomous-database-family"]
+  description = "Least-privilege IAM fragments granted to the dynamic group in compartment_id. Add only capabilities the node needs."
+
+  validation {
+    condition = length(var.iam_instance_principal_compartment_permissions) > 0 && alltrue([
+      for permission in var.iam_instance_principal_compartment_permissions :
+      length(trimspace(permission)) > 0 &&
+      !startswith(lower(trimspace(permission)), "allow ") &&
+      !strcontains(lower(permission), " in tenancy") &&
+      !strcontains(lower(permission), " in compartment")
+    ])
+    error_message = "Each IAM permission must be a fragment such as 'read autonomous-database-family', without Allow or a location clause."
+  }
+}
 variable "append_compartment_suffix_to_immutable_names" {
   type        = bool
   default     = true
