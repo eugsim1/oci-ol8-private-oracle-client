@@ -8,7 +8,7 @@ ssh_private_key="${2:-}"
 
 cd "$root_dir/terraform"
 test -f "$tfvars_file" || { echo "Missing terraform/$tfvars_file" >&2; exit 1; }
-terraform init
+bash "$root_dir/scripts/select-compartment-workspace.sh" "$tfvars_file"
 terraform apply -auto-approve -var-file="$tfvars_file"
 
 private_ip="$(terraform output -raw private_ip)"

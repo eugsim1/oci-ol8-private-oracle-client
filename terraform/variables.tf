@@ -1,5 +1,29 @@
 variable "region" { type = string }
-variable "compartment_id" { type = string }
+variable "compartment_id" {
+  type        = string
+  description = "OCID of the single target compartment for every resource created by this stack."
+
+  validation {
+    condition     = can(regex("^ocid1\\.(compartment|tenancy)\\.", var.compartment_id))
+    error_message = "compartment_id must be an OCI compartment or tenancy OCID."
+  }
+}
+variable "append_compartment_suffix_to_immutable_names" {
+  type        = bool
+  default     = true
+  description = "Append a deterministic compartment-specific suffix to immutable/unique ADB and Bastion names. Keep true for deployments in multiple compartments; set false only to retain or import legacy unsuffixed resources."
+}
+variable "immutable_name_suffix" {
+  type        = string
+  default     = null
+  nullable    = true
+  description = "Optional 1-8 character alphanumeric suffix for immutable ADB and Bastion names. Null derives it deterministically from compartment_id."
+
+  validation {
+    condition     = var.immutable_name_suffix == null ? true : can(regex("^[A-Za-z0-9]{1,8}$", var.immutable_name_suffix))
+    error_message = "immutable_name_suffix must be null or 1-8 alphanumeric characters."
+  }
+}
 variable "availability_domain_index" {
   type        = number
   default     = 0
@@ -101,6 +125,11 @@ variable "adb_admin_password" {
 variable "adb_db_name" {
   type    = string
   default = "ORAPRIV"
+
+  validation {
+    condition     = can(regex("^[A-Za-z][A-Za-z0-9]{0,29}$", var.adb_db_name))
+    error_message = "adb_db_name must begin with a letter, contain only letters and numbers, and be at most 30 characters."
+  }
 }
 variable "adb_display_name" {
   type    = string

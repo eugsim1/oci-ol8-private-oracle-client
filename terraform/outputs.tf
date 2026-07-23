@@ -1,5 +1,17 @@
 output "instance_id" { value = module.compute.instance_id }
 output "instance_name" { value = module.compute.instance_name }
+output "target_compartment_id" {
+  description = "The compartment OCID supplied through terraform.tfvars and used by every created resource."
+  value       = local.target_compartment_id
+}
+output "resource_compartment_ids" {
+  description = "Distinct compartment OCIDs reported by all Terraform-created resources; this must contain only target_compartment_id."
+  value       = local.created_resource_compartment_ids
+}
+output "terraform_workspace" { value = terraform.workspace }
+output "immutable_name_suffix" { value = local.immutable_name_suffix }
+output "effective_bastion_name" { value = module.bastion.bastion_name }
+output "effective_autonomous_database_name" { value = module.autonomous_database.db_name }
 output "available_availability_domains" { value = local.availability_domain_names }
 output "selected_availability_domain" { value = local.selected_availability_domain }
 output "private_ip" { value = module.compute.private_ip }

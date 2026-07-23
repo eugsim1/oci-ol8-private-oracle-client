@@ -13,3 +13,10 @@ output "license_model" { value = oci_database_autonomous_database.this.license_m
 output "is_mtls_connection_required" { value = oci_database_autonomous_database.this.is_mtls_connection_required }
 output "subnet_id" { value = oci_database_autonomous_database.this.subnet_id }
 output "tls_high_connection_string" { value = try(local.tls_high_connection_strings[0], "") }
+output "resource_compartment_ids" {
+  # NSG rules inherit their compartment from the NSG.
+  value = distinct([
+    oci_core_network_security_group.database.compartment_id,
+    oci_database_autonomous_database.this.compartment_id
+  ])
+}

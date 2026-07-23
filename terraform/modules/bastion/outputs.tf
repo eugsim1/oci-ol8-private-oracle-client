@@ -9,3 +9,7 @@ output "bastion_name" { value = oci_bastion_bastion.this.name }
 output "bastion_state" { value = oci_bastion_bastion.this.state }
 output "bastion_private_endpoint_ip" { value = oci_bastion_bastion.this.private_endpoint_ip_address }
 output "session_ttl_in_seconds" { value = try(oci_bastion_session.ansible[0].session_ttl_in_seconds, null) }
+output "resource_compartment_ids" {
+  # Bastion sessions inherit their compartment from the parent Bastion.
+  value = [oci_bastion_bastion.this.compartment_id]
+}

@@ -29,7 +29,7 @@ fi
   exit 1
 }
 
-terraform -chdir="$terraform_dir" init -input=false
+bash "$root_dir/scripts/select-compartment-workspace.sh" "$tfvars_file"
 
 session_enabled="$(terraform -chdir="$terraform_dir" output -raw bastion_session_enabled 2>/dev/null || true)"
 [[ "$session_enabled" == "true" ]] || {

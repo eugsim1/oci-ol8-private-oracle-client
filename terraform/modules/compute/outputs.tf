@@ -10,3 +10,6 @@ output "ocpus" { value = var.ocpus }
 output "memory_in_gbs" { value = var.memory_in_gbs }
 output "boot_volume_size_in_gbs" { value = var.boot_volume_size_in_gbs }
 output "imds_v2_only" { value = true }
+output "resource_compartment_ids" {
+  value = [oci_core_instance.this.compartment_id]
+}

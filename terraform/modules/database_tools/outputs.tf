@@ -19,3 +19,15 @@ output "endpoint_service_id" { value = local.selected_endpoint_service_id }
 output "password_secret_id" { value = local.effective_password_secret_id }
 output "vault_id" { value = try(oci_kms_vault.database_tools[0].id, null) }
 output "key_id" { value = try(oci_kms_key.database_tools[0].id, null) }
+output "resource_compartment_ids" {
+  # NSG rules inherit their compartment from the NSG. Existing secrets supplied
+  # by OCID are not created by this module and are deliberately not asserted.
+  value = distinct(compact([
+    try(oci_kms_vault.database_tools[0].compartment_id, null),
+    try(oci_kms_key.database_tools[0].compartment_id, null),
+    try(oci_vault_secret.database_password[0].compartment_id, null),
+    try(oci_core_network_security_group.database_tools[0].compartment_id, null),
+    try(oci_database_tools_database_tools_private_endpoint.autonomous_database[0].compartment_id, null),
+    try(oci_database_tools_database_tools_connection.autonomous_database[0].compartment_id, null)
+  ]))
+}

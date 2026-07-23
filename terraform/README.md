@@ -21,6 +21,110 @@ compute_node_name = "oracle-app-01"
 
 The value is also used as the naming prefix for the VCN, subnet, Bastion, and related resources.
 
+## Deploying the same project to another compartment
+
+`compartment_id` in `terraform.tfvars` is now the single source of truth for
+every Terraform-created resource. The root module passes that value to the
+network, Compute, Bastion, Autonomous Database, and Database Tools modules.
+After an apply, Terraform also checks the compartment reported by every
+created resource. These outputs make the result directly auditable:
+
+```bash
+terraform output -raw target_compartment_id
+terraform output -json resource_compartment_ids
+```
+
+The second command must return only the value shown by the first command.
+Bastion sessions and NSG rules do not accept a separate compartment argument;
+they inherit the compartment of their parent Bastion or NSG.
+
+Changing a compartment does not make an Autonomous Database name reusable.
+Oracle requires `db_name` to be unique across the tenancy in the same region.
+Bastion names can also conflict with an existing Bastion. By default this
+project appends a stable suffix derived from `compartment_id` to those two
+immutable names:
+
+```hcl
+append_compartment_suffix_to_immutable_names = true
+immutable_name_suffix                        = null
+```
+
+For example, the configured `ORAPRIV` database name becomes something similar
+to `ORAPRIV8A31F4C2`. Set `immutable_name_suffix = "FRATEST2"` when you prefer
+an explicit deployment identifier. The effective values are available as:
+
+```bash
+terraform output -raw effective_autonomous_database_name
+terraform output -raw effective_bastion_name
+```
+
+Do not reuse one Terraform state for independent deployments. Before planning
+a new compartment, select the deterministic compartment workspace:
+
+```bash
+cd ..
+bash scripts/select-compartment-workspace.sh terraform.tfvars
+cd terraform
+terraform plan -var-file=terraform.tfvars -out=tfplan
+terraform apply tfplan
+```
+
+The end-to-end `scripts/deploy.sh` wrapper performs this workspace selection
+automatically. If the currently selected workspace already manages resources,
+the helper stops instead of silently switching state. For a deliberate new
+deployment that must leave the current workspace untouched:
+
+```bash
+ALLOW_EXISTING_STATE_WORKSPACE_SWITCH=true \
+  bash scripts/select-compartment-workspace.sh terraform.tfvars
+```
+
+This override selects a different workspace; it does not move or delete the
+resources recorded in the original workspace.
+
+### Existing ORAPRIV or Bastion resources
+
+Choose one of these mutually exclusive approaches:
+
+1. For a new environment in another compartment, keep
+   `append_compartment_suffix_to_immutable_names = true`, select the new
+   compartment workspace, review the plan, and create new resources.
+2. To make Terraform manage existing legacy resources, set
+   `append_compartment_suffix_to_immutable_names = false` and import their
+   OCIDs into the correct workspace:
+
+```bash
+terraform import -var-file=terraform.tfvars \
+  'module.autonomous_database.oci_database_autonomous_database.this' \
+  'ocid1.autonomousdatabase...'
+
+terraform import -var-file=terraform.tfvars \
+  'module.bastion.oci_bastion_bastion.this' \
+  'ocid1.bastion...'
+
+terraform plan -var-file=terraform.tfvars
+```
+
+Never import a resource from `TestAssets` into a state intended for a different
+compartment. Import means “manage this existing object”; it does not move it.
+
+The Database Tools outputs are defined in `outputs.tf`, but Terraform records
+new output definitions in state only after an apply or refresh-only apply
+completes. If an earlier apply failed before outputs were recorded, fix the
+resource conflict first and then run:
+
+```bash
+terraform apply -refresh-only -var-file=terraform.tfvars
+terraform output database_tools_connection_id
+terraform output database_tools_private_endpoint_ip
+terraform output database_tools_runtime_endpoint
+```
+
+When `database_tools_enabled = false`, the resource values are `null`;
+Terraform can omit null-valued outputs from state. Check
+`terraform output -raw database_tools_enabled` before requesting the
+Database Tools resource outputs.
+
 ## Conditional managed SSH session
 
 The Bastion service is always deployed. Creation of its temporary managed SSH session is controlled separately:
@@ -43,6 +147,9 @@ export TF_VAR_adb_admin_password
 terraform init
 terraform fmt -recursive
 terraform validate
+cd ..
+bash scripts/select-compartment-workspace.sh terraform.tfvars
+cd terraform
 terraform plan -var-file=terraform.tfvars -out=tfplan
 terraform apply tfplan
 terraform output

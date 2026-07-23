@@ -1,8 +1,21 @@
 data "oci_identity_availability_domains" "available" {
-  compartment_id = var.compartment_id
+  compartment_id = local.target_compartment_id
 }
 
 locals {
+  # This is the single compartment source of truth for every root module.
+  target_compartment_id = var.compartment_id
+  immutable_name_suffix = coalesce(
+    var.immutable_name_suffix,
+    substr(sha256(var.compartment_id), 0, 8)
+  )
+  effective_bastion_name_prefix = var.append_compartment_suffix_to_immutable_names ? "${var.compute_node_name}-${lower(local.immutable_name_suffix)}" : var.compute_node_name
+  effective_adb_db_name = var.append_compartment_suffix_to_immutable_names ? format(
+    "%s%s",
+    substr(upper(var.adb_db_name), 0, 30 - length(local.immutable_name_suffix)),
+    upper(local.immutable_name_suffix)
+  ) : upper(var.adb_db_name)
+
   ssh_public_key_content = trimspace(file(pathexpand(var.ssh_public_key_path)))
   bastion_session_public_key_path = pathexpand(
     coalesce(var.bastion_session_public_key_path, var.ssh_public_key_path)
@@ -18,7 +31,7 @@ locals {
 
 module "network" {
   source              = "./modules/network"
-  compartment_id      = var.compartment_id
+  compartment_id      = local.target_compartment_id
   name                = var.compute_node_name
   vcn_cidr            = var.vcn_cidr
   private_subnet_cidr = var.private_subnet_cidr
@@ -26,7 +39,7 @@ module "network" {
 
 module "compute" {
   source                  = "./modules/compute"
-  compartment_id          = var.compartment_id
+  compartment_id          = local.target_compartment_id
   availability_domain     = local.selected_availability_domain
   subnet_id               = module.network.private_subnet_id
   instance_display_name   = var.compute_node_name
@@ -41,8 +54,8 @@ module "compute" {
 
 module "bastion" {
   source                     = "./modules/bastion"
-  compartment_id             = var.compartment_id
-  name                       = var.compute_node_name
+  compartment_id             = local.target_compartment_id
+  name                       = local.effective_bastion_name_prefix
   target_subnet_id           = module.network.private_subnet_id
   target_instance_id         = module.compute.instance_id
   target_private_ip          = module.compute.private_ip
@@ -58,11 +71,11 @@ module "bastion" {
 
 module "autonomous_database" {
   source                                = "./modules/autonomous_database"
-  compartment_id                        = var.compartment_id
+  compartment_id                        = local.target_compartment_id
   vcn_id                                = module.network.vcn_id
   subnet_id                             = module.network.private_subnet_id
   client_cidr                           = var.vcn_cidr
-  db_name                               = var.adb_db_name
+  db_name                               = local.effective_adb_db_name
   display_name                          = var.adb_display_name
   admin_password                        = var.adb_admin_password
   db_workload                           = var.adb_workload
@@ -79,7 +92,7 @@ module "autonomous_database" {
 module "database_tools" {
   source                            = "./modules/database_tools"
   enabled                           = var.database_tools_enabled
-  compartment_id                    = var.compartment_id
+  compartment_id                    = local.target_compartment_id
   vcn_id                            = module.network.vcn_id
   subnet_id                         = module.network.private_subnet_id
   network_security_group_id         = module.autonomous_database.network_security_group_id
@@ -97,4 +110,24 @@ module "database_tools" {
   runtime_identity                  = var.database_tools_runtime_identity
 
   depends_on = [module.autonomous_database]
+}
+
+locals {
+  created_resource_compartment_ids = distinct(concat(
+    module.network.resource_compartment_ids,
+    module.compute.resource_compartment_ids,
+    module.bastion.resource_compartment_ids,
+    module.autonomous_database.resource_compartment_ids,
+    module.database_tools.resource_compartment_ids
+  ))
+}
+
+check "all_created_resources_use_target_compartment" {
+  assert {
+    condition = alltrue([
+      for compartment_id in local.created_resource_compartment_ids :
+      compartment_id == local.target_compartment_id
+    ])
+    error_message = "At least one Terraform-created resource is outside compartment_id. Inspect the resource_compartment_ids output before continuing."
+  }
 }

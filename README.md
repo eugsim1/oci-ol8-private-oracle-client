@@ -68,6 +68,29 @@ Oracle documents that an Autonomous Database private endpoint keeps database
 traffic off the public Internet. See
 [Autonomous Database private endpoint network access](https://docs.oracle.com/en-us/iaas/autonomous-database-serverless/doc/autonomous-network-access.html).
 
+## Safe deployments to multiple compartments
+
+Every created resource now receives the `compartment_id` configured in
+`terraform/terraform.tfvars`, and Terraform verifies the reported resource
+compartments after apply. Immutable Autonomous Database and Bastion names get a
+deterministic compartment suffix by default, preventing collisions when the
+same stack is deployed in another compartment. Independent compartments also
+use independent Terraform workspaces:
+
+```bash
+cp terraform/terraform.tfvars.example terraform/terraform.tfvars
+# Edit terraform/terraform.tfvars and set the target compartment_id.
+
+bash scripts/select-compartment-workspace.sh terraform.tfvars
+cd terraform
+terraform plan -var-file=terraform.tfvars
+```
+
+The helper refuses to leave a workspace that already contains managed
+resources unless the new-environment override is explicitly enabled. See
+[the Terraform multi-compartment and import guide](terraform/README.md#deploying-the-same-project-to-another-compartment)
+before changing `compartment_id` on an existing deployment.
+
 ## Solution architecture
 
 ### OCI deployment topology
@@ -491,3 +514,36 @@ OCI Bastion is the default here. Ansible can instead run from a controller that 
 - Autonomous Database accepts TLS and mTLS SQL connections on TCP 1522 only from the VCN CIDR through its NSG; Database Tools reaches it through a separate service-managed private endpoint.
 - Store Terraform state in an encrypted, access-controlled backend because it can contain the database ADMIN password.
 - Rotate or revoke the OCI API signing key if the target server is compromised.
+
+## v1.1.0 modifications
+
+Released on 2026-07-23, this update makes repeated deployments to different
+OCI compartments safe and auditable:
+
+- Uses `compartment_id` from `terraform.tfvars` as the single target
+  compartment for the network, Compute, Bastion, Autonomous Database, Database
+  Tools, Vault, key, secret, and NSG resources.
+- Adds an apply-time Terraform check and the `target_compartment_id` and
+  `resource_compartment_ids` outputs to verify the actual resource placement.
+- Appends a deterministic compartment-specific suffix to the immutable
+  Autonomous Database `db_name` and Bastion name by default. This prevents an
+  `ORAPRIV` collision across a tenancy/region and conflicts with an existing
+  Bastion when the project is deployed into another compartment.
+- Adds `immutable_name_suffix` for an explicit deployment identifier and
+  `append_compartment_suffix_to_immutable_names = false` for importing legacy
+  unsuffixed resources.
+- Adds `scripts/select-compartment-workspace.sh` so independent compartments
+  use independent Terraform state workspaces.
+- Refuses to leave a workspace containing managed resources unless
+  `ALLOW_EXISTING_STATE_WORKSPACE_SWITCH=true` explicitly authorizes a new,
+  separate deployment.
+- Updates the deployment and Bastion-session renewal scripts to select the
+  compartment workspace before applying changes.
+- Adds effective ADB/Bastion name and Terraform workspace outputs, and records
+  deployment compartment metadata in the generated CSV inventory.
+- Documents new-compartment deployment, existing-resource imports, state
+  isolation, and recovery of Database Tools outputs after a failed apply.
+- Requires and validates Oracle OCI Terraform provider `8.24.x`.
+
+The original pre-update code remains available in the
+[`v1.0.0` release](https://github.com/eugsim1/oci-ol8-private-oracle-client/releases/tag/v1.0.0).

@@ -1,5 +1,8 @@
 locals {
   infrastructure_report_rows = [
+    { resource_type = "deployment", resource_name = terraform.workspace, attribute = "target_compartment_id", value = local.target_compartment_id },
+    { resource_type = "deployment", resource_name = terraform.workspace, attribute = "immutable_name_suffix", value = local.immutable_name_suffix },
+
     { resource_type = "network", resource_name = "vcn", attribute = "id", value = module.network.vcn_id },
     { resource_type = "network", resource_name = "vcn", attribute = "cidr", value = module.network.vcn_cidr },
     { resource_type = "network", resource_name = "private_subnet", attribute = "id", value = module.network.private_subnet_id },
