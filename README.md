@@ -10,7 +10,7 @@ project, installs its Go and Oracle runtime dependencies, creates the target
 database schema, downloads the Autonomous Database wallet, and verifies the
 private database connection.
 
-**Latest release documented here: `v1.2.0` (2026-07-23).**
+**Latest release documented here: `v1.3.0` (2026-08-07).**
 
 The deployed utility reads OCI FOCUS cost-report objects from Object Storage,
 processes multiple gzip CSV files concurrently, enriches and normalizes the
@@ -204,8 +204,11 @@ final FOCUS schema/load workflow.
 │   ├── deploy.sh
 │   ├── run-ansible.sh
 │   ├── renew-bastion-session.sh
+│   ├── manage-existing-stack.sh
 │   ├── connect-oracle-server.sh
 │   └── open-vnc-tunnel.sh
+├── tests/
+│   └── test-manage-existing-stack.sh
 ├── docs/architecture/
 │   ├── oci-focus-private-finops.drawio
 │   ├── oci-focus-private-finops.png
@@ -213,7 +216,10 @@ final FOCUS schema/load workflow.
 │   ├── oci-focus-private-finops-sda.png
 │   ├── generate-diagrams.ps1
 │   └── README.md
+├── docs/EXISTING_STACK_LIFECYCLE.md
 ├── reports/                  # generated locally; contents are ignored
+├── Location.md
+├── RELEASE_NOTES_v1.3.0.md
 ├── LICENSE
 ├── SECURITY.md
 └── SANITIZATION_REPORT.md
@@ -223,7 +229,7 @@ final FOCUS schema/load workflow.
 
 - Terraform 1.6 or later
 - Ansible Core 2.15 or later
-- OpenSSH client, Bash, and OCI provider credentials
+- OCI CLI, OpenSSH client, Bash, and OCI provider credentials
 - An SSH key pair; Terraform reads its public-key file and installs the key for both `opc` and `oracle`, while Ansible reads the matching private-key file locally
 - IAM permission to manage VCN, Compute, NAT Gateway, Bastion, and Bastion Session resources
 - IAM permission to manage Autonomous Database, Network Security Groups, Database Tools, Vaults, Keys, and Secrets
@@ -344,7 +350,7 @@ read -rsp "ADB wallet password (Enter to reuse ADMIN password): " ADB_WALLET_PAS
 export ADB_WALLET_PASSWORD="${ADB_WALLET_PASSWORD:-$TF_VAR_adb_admin_password}"
 read -rsp "oracle VNC password: " ORACLE_VNC_PASSWORD
 export ORACLE_VNC_PASSWORD
-chmod +x scripts/deploy.sh scripts/run-ansible.sh scripts/renew-bastion-session.sh scripts/connect-oracle-server.sh scripts/open-vnc-tunnel.sh
+chmod +x scripts/deploy.sh scripts/run-ansible.sh scripts/renew-bastion-session.sh scripts/manage-existing-stack.sh scripts/connect-oracle-server.sh scripts/open-vnc-tunnel.sh
 ./scripts/deploy.sh terraform.tfvars
 ```
 
@@ -471,6 +477,151 @@ The role intentionally separates required package installation from full OS patc
 
 Instant Client installation uses `oracle-instantclient-release-26ai-el8` and the generic `oracle-instantclient-basic`, `oracle-instantclient-tools`, and `oracle-instantclient-sqlplus` RPM names. This avoids brittle, release-specific ZIP filenames. The Tools package supplies SQL*Loader and Oracle Data Pump utilities.
 
+## Start or stop the existing OCI stack
+
+Release `v1.3.0` adds `scripts/manage-existing-stack.sh` for operating the
+existing resource OCIDs without a Terraform apply. By default it reads these
+current Terraform outputs:
+
+```bash
+terraform -chdir=terraform output -raw instance_id
+terraform -chdir=terraform output -raw autonomous_database_id
+terraform -chdir=terraform output -raw bastion_id
+terraform -chdir=terraform output -raw private_ip
+terraform -chdir=terraform output -raw region
+terraform -chdir=terraform output -raw bastion_session_public_key_path
+```
+
+The start workflow sends both start requests, waits for Compute `RUNNING` and
+Autonomous Database `AVAILABLE`, then creates a fresh OCI Bastion managed SSH
+session and waits for `ACTIVE`. `AVAILABLE` is OCI's running/ready lifecycle
+state for Autonomous Database. The script prints a complete OpenSSH ProxyCommand
+and exits; add `--connect` only when an interactive login is wanted.
+
+Run it from an **external Linux controller**. The controller needs Bash, OCI CLI,
+Terraform when reading state outputs, and OpenSSH for `--connect`. Confirm the
+OCI identity and perform a read-only preview first:
+
+```bash
+oci iam region-subscription list --profile DEFAULT --all
+chmod +x scripts/manage-existing-stack.sh
+./scripts/manage-existing-stack.sh --dry-run
+```
+
+Start the existing resources and create the session:
+
+```bash
+./scripts/manage-existing-stack.sh
+```
+
+Create the session and immediately open interactive SSH:
+
+```bash
+./scripts/manage-existing-stack.sh \
+  --ssh-private-key /secure/keys/bastion_key \
+  --connect
+```
+
+Explicit resource flags support existing/imported resources when the local
+Terraform outputs are unavailable. The following OCIDs are test placeholders:
+
+```bash
+./scripts/manage-existing-stack.sh \
+  --instance-id ocid1.instance.oc1.eu-frankfurt-1.testcompute \
+  --autonomous-database-id ocid1.autonomousdatabase.oc1.eu-frankfurt-1.testadb \
+  --bastion-id ocid1.bastion.oc1.eu-frankfurt-1.testbastion \
+  --private-ip 10.0.1.10 \
+  --region eu-frankfurt-1 \
+  --ssh-public-key /secure/keys/bastion_key.pub \
+  --ssh-private-key /secure/keys/bastion_key \
+  --profile DEFAULT
+```
+
+Replace every `test...` OCID before a live run. The lifecycle API calls do not
+need a compartment argument because each existing resource is addressed by its
+OCID; the resources' compartments still determine IAM authorization.
+
+To use an authorized controller instance principal:
+
+```bash
+./scripts/manage-existing-stack.sh \
+  --auth instance_principal \
+  --region eu-frankfurt-1
+```
+
+### Stop all sessions and services
+
+Preview first, because this action can disconnect other operators:
+
+```bash
+./scripts/manage-existing-stack.sh --stop-all --dry-run
+```
+
+Then close **every non-deleted session returned for the selected Bastion**,
+stop Autonomous Database, gracefully stop Compute with `SOFTSTOP`, and wait for
+both services to report `STOPPED`:
+
+```bash
+./scripts/manage-existing-stack.sh --stop-all
+```
+
+For an approved emergency hard power-off only:
+
+```bash
+./scripts/manage-existing-stack.sh --stop-all --force-stop
+```
+
+Do not execute `--stop-all` from the Compute instance being managed. Its own
+shutdown can terminate the process before final validation and CSV completion.
+
+### Main flags
+
+| Flag | Purpose |
+|---|---|
+| `--start` | Start resources and create a managed SSH session; this is the default. |
+| `--stop-all` | Delete all selected-Bastion sessions and stop ADB and Compute. |
+| `--force-stop` | Use Compute `STOP` instead of graceful `SOFTSTOP`. |
+| `--connect` | Open interactive SSH after the new session is active. |
+| `--dry-run` | Perform read-only discovery and write planned actions only. |
+| `--profile NAME` | Select an OCI CLI profile; default is `DEFAULT`. |
+| `--auth MODE` | Select an OCI CLI auth mode such as `instance_principal`. |
+| `--session-ttl SECONDS` | Set session lifetime from 30 through 10800 seconds. |
+| `--wait-seconds SECONDS` | Set state wait timeout; default is 3600. |
+| `--poll-seconds SECONDS` | Set poll interval; default is 10. |
+| `--report-dir PATH` | Override the default `reports/` CSV destination. |
+
+Run `./scripts/manage-existing-stack.sh --help` for every resource, SSH, region,
+authentication, wait, and report flag.
+
+### Timestamped audit report
+
+Every valid start, stop, or dry-run invocation creates:
+
+```text
+reports/stack-lifecycle-YYYYMMDDTHHMMSSZ-PID.csv
+```
+
+It records the UTC timestamp, run ID, action, resource type and OCID, operation,
+before/after states, status, and a safe message. Reports contain infrastructure
+identifiers and are excluded by `.gitignore`; they never include key contents,
+wallets, or database passwords. Failures are recorded by an exit trap whenever
+the report has already been initialized.
+
+### Required IAM scope
+
+Use a dedicated operator group or dynamic group. A broad starting point is
+`manage instance-family`, `manage autonomous-database-family`, `read bastion`,
+and `manage bastion-session` in the stack compartment. Reduce this with IAM
+conditions where possible and validate it with the tenancy security team.
+
+The full runbook includes every flag, least-privilege considerations, test-OCID
+examples, CSV fields, troubleshooting, and rollback steps in
+[`docs/EXISTING_STACK_LIFECYCLE.md`](docs/EXISTING_STACK_LIFECYCLE.md).
+Official command references are the OCI CLI pages for
+[Compute instance action](https://docs.oracle.com/en-us/iaas/tools/oci-cli/latest/oci_cli_docs/cmdref/compute/instance/action.html),
+[Autonomous Database start](https://docs.oracle.com/en-us/iaas/tools/oci-cli/latest/oci_cli_docs/cmdref/db/autonomous-database/start.html), and
+[Bastion managed SSH session creation](https://docs.oracle.com/en-us/iaas/tools/oci-cli/latest/oci_cli_docs/cmdref/bastion/session/create-managed-ssh.html).
+
 ## Expired Bastion sessions
 
 Sessions are deliberately temporary. Renew an expired or closed session and
@@ -543,6 +694,28 @@ OCI Bastion is the default here. Ansible can instead run from a controller that 
 - Store Terraform state in an encrypted, access-controlled backend because it can contain the database ADMIN password.
 - Rotate or revoke the OCI API signing key if the target server is compromised.
 
+## v1.3.0 latest changes
+
+Released on 2026-08-07, this update adds safe lifecycle operations for the
+already-deployed stack:
+
+- starts existing Compute and Autonomous Database resources from their OCIDs;
+- waits for Compute `RUNNING` and Autonomous Database `AVAILABLE` before access;
+- creates and validates a new Bastion managed SSH session, with optional
+  interactive `--connect`;
+- adds explicit `--stop-all` and emergency-only `--force-stop` behavior;
+- closes every non-deleted session belonging to the selected Bastion before
+  shutdown;
+- uses existing Terraform outputs by default and supports full CLI overrides;
+- creates a timestamped CSV for every valid operational invocation, including
+  planned actions and failures;
+- includes an OCI-free mock test using documentation-only test OCIDs; and
+- adds the complete operator runbook, release notes, and sanitized local
+  location record.
+
+See [`RELEASE_NOTES_v1.3.0.md`](RELEASE_NOTES_v1.3.0.md) for the safety and
+compatibility notes.
+
 ## v1.1.0 modifications
 
 Released on 2026-07-23, this update makes repeated deployments to different
@@ -576,7 +749,7 @@ OCI compartments safe and auditable:
 The original pre-update code remains available in the
 [`v1.0.0` release](https://github.com/eugsim1/oci-ol8-private-oracle-client/releases/tag/v1.0.0).
 
-## v1.2.0 latest changes
+## v1.2.0 changes
 
 Released on 2026-07-23, this update adds optional Compute instance-principal
 authentication while retaining API-key authentication for backward

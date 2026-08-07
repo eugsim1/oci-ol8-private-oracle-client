@@ -1,12 +1,18 @@
 # Sanitization report
 
-Date: 2026-07-21
+Initial review: 2026-07-21
+
+Latest review: 2026-08-07
 
 The source tree was reviewed before its initial GitHub publication. The audit
 found no embedded GitHub tokens, private-key blocks, AWS-style access keys,
-hardcoded password literals, real long-form OCI OCIDs, Windows user-profile
-paths, wallet archives, Terraform state, or credential files in the
-publishable source set.
+hardcoded password literals, real long-form OCI OCIDs, wallet archives,
+Terraform state, or credential files in the publishable source set.
+
+`Location.md` intentionally contains the user-requested documentation-only
+Windows path after removing its private workspace segment. It does not identify
+the actual Git working copy used to publish this release. Lifecycle examples
+and offline tests use non-resolving OCIDs containing explicit `test` labels.
 
 The repository ignore policy excludes:
 
