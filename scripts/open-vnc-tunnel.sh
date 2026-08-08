@@ -19,6 +19,7 @@ session_public_key_path="$(tf_output bastion_session_public_key_path)"
 
 [[ "$session_state" == "ACTIVE" ]] || {
   echo "Bastion session is $session_state, not ACTIVE." >&2
+  echo "Renew it when resources are running, or use start-and-connect.sh when they may be stopped." >&2
   exit 2
 }
 

@@ -2,11 +2,15 @@
 set -euo pipefail
 
 root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+terraform_dir="${TERRAFORM_DIR:-$root_dir/terraform}"
 tfvars_argument="${1:-terraform.tfvars}"
+terraform_bin="${TERRAFORM_BIN:-terraform}"
+
+command -v "$terraform_bin" >/dev/null || { echo "terraform is required: $terraform_bin" >&2; exit 1; }
 
 case "$tfvars_argument" in
   /*) tfvars_file="$tfvars_argument" ;;
-  *) tfvars_file="$root_dir/terraform/$tfvars_argument" ;;
+  *) tfvars_file="$terraform_dir/$tfvars_argument" ;;
 esac
 
 test -f "$tfvars_file" || {
@@ -27,11 +31,11 @@ fi
 compartment_hash="$(printf '%s' "$compartment_id" | sha256sum | awk '{print substr($1, 1, 12)}')"
 target_workspace="compartment-$compartment_hash"
 
-cd "$root_dir/terraform"
-terraform init -input=false
+cd "$terraform_dir"
+"$terraform_bin" init -input=false
 
-current_workspace="$(terraform workspace show)"
-current_state="$(terraform state list 2>/dev/null || true)"
+current_workspace="$("$terraform_bin" workspace show)"
+current_state="$("$terraform_bin" state list 2>/dev/null || true)"
 current_state_count="$(printf '%s\n' "$current_state" | awk 'NF { count++ } END { print count + 0 }')"
 
 if [[ "$current_workspace" != "$target_workspace" && "$current_state_count" -gt 0 ]]; then
@@ -55,10 +59,10 @@ EOF
   fi
 fi
 
-terraform workspace select -or-create "$target_workspace"
+"$terraform_bin" workspace select -or-create "$target_workspace"
 
 echo "Terraform workspace: $target_workspace"
 echo "Target compartment:  $compartment_id"
-selected_state="$(terraform state list 2>/dev/null || true)"
+selected_state="$("$terraform_bin" state list 2>/dev/null || true)"
 selected_state_count="$(printf '%s\n' "$selected_state" | awk 'NF { count++ } END { print count + 0 }')"
 echo "State resources:     $selected_state_count"

@@ -35,17 +35,18 @@ through the active managed SSH session; no IP address, session OCID, region,
 user, port, or key argument is required.
 
 If the generated inventory references an expired or closed OCI Bastion session,
-renew it from the project root. The renewal script waits for `ACTIVE`, regenerates
-the inventory with the new session OCID, verifies SSH, and reruns Ansible:
+renew it from the project root. The renewal script replaces only the
+Terraform-managed session and waits for `ACTIVE`; it does not run Ansible:
 
 ```bash
 chmod +x scripts/renew-bastion-session.sh
 ./scripts/renew-bastion-session.sh terraform.tfvars
 ```
 
-Use `RUN_ANSIBLE_AFTER_RENEWAL=false` to create the new session without running
-the playbook immediately. A later `./scripts/run-ansible.sh` invocation will
-regenerate the inventory before connecting.
+Run `./scripts/run-ansible.sh` separately when provisioning is actually needed;
+it will regenerate the inventory before connecting. If Compute or Autonomous
+Database may be stopped, use `./scripts/start-and-connect.sh` instead. The full
+script decision table is in [`../scripts/README.md`](../scripts/README.md).
 
 The script reads `private_ip`, region, Bastion session OCID/state, the session
 public-key path, and `iam_instance_principal_enabled` directly from Terraform

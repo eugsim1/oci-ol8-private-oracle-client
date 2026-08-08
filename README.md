@@ -10,7 +10,7 @@ project, installs its Go and Oracle runtime dependencies, creates the target
 database schema, downloads the Autonomous Database wallet, and verifies the
 private database connection.
 
-**Latest release documented here: `v1.3.0` (2026-08-07).**
+**Current main-branch documentation version: `v1.4.0` (2026-08-08).**
 
 The deployed utility reads OCI FOCUS cost-report objects from Object Storage,
 processes multiple gzip CSV files concurrently, enriches and normalizes the
@@ -201,14 +201,18 @@ final FOCUS schema/load workflow.
 │   ├── site.yml
 │   └── README.md
 ├── scripts/
+│   ├── README.md
 │   ├── deploy.sh
 │   ├── run-ansible.sh
 │   ├── renew-bastion-session.sh
+│   ├── start-and-connect.sh
 │   ├── manage-existing-stack.sh
 │   ├── connect-oracle-server.sh
-│   └── open-vnc-tunnel.sh
+│   ├── open-vnc-tunnel.sh
+│   └── select-compartment-workspace.sh
 ├── tests/
-│   └── test-manage-existing-stack.sh
+│   ├── test-manage-existing-stack.sh
+│   └── test-bastion-session-scripts.sh
 ├── docs/architecture/
 │   ├── oci-focus-private-finops.drawio
 │   ├── oci-focus-private-finops.png
@@ -219,6 +223,7 @@ final FOCUS schema/load workflow.
 ├── docs/EXISTING_STACK_LIFECYCLE.md
 ├── reports/                  # generated locally; contents are ignored
 ├── Location.md
+├── RELEASE_NOTES_v1.4.0.md
 ├── RELEASE_NOTES_v1.3.0.md
 ├── LICENSE
 ├── SECURITY.md
@@ -350,7 +355,7 @@ read -rsp "ADB wallet password (Enter to reuse ADMIN password): " ADB_WALLET_PAS
 export ADB_WALLET_PASSWORD="${ADB_WALLET_PASSWORD:-$TF_VAR_adb_admin_password}"
 read -rsp "oracle VNC password: " ORACLE_VNC_PASSWORD
 export ORACLE_VNC_PASSWORD
-chmod +x scripts/deploy.sh scripts/run-ansible.sh scripts/renew-bastion-session.sh scripts/manage-existing-stack.sh scripts/connect-oracle-server.sh scripts/open-vnc-tunnel.sh
+chmod +x scripts/*.sh tests/*.sh
 ./scripts/deploy.sh terraform.tfvars
 ```
 
@@ -473,6 +478,19 @@ and the generated Ansible inventory are its fallbacks when the file does not exi
 safely and refuses to connect when the recorded session is not `ACTIVE`. Renew
 an expired session first with `scripts/renew-bastion-session.sh`.
 
+For routine access when Compute or Autonomous Database may be stopped, use the
+artifact-driven workflow instead:
+
+```bash
+./scripts/start-and-connect.sh --tfvars terraform.tfvars
+```
+
+It selects the compartment workspace, resolves the existing key artifacts,
+starts only stopped resources, waits for Compute `RUNNING` and ADB `AVAILABLE`,
+creates a fresh Bastion session, writes a timestamped CSV, and opens SSH. It
+does not run Ansible. See [`scripts/README.md`](scripts/README.md) for the
+decision table and documentation for every script.
+
 The role intentionally separates required package installation from full OS patching. `oracle_update_all_packages` defaults to `false`, preventing unrelated enabled-repository conflicts from blocking Python, OCI CLI, and Instant Client setup. It installs Python 3.12 as the latest OL8.10 application runtime and uses Python 3.11 for the OCI CLI virtual environment according to Oracle's OL8 support matrix.
 
 Instant Client installation uses `oracle-instantclient-release-26ai-el8` and the generic `oracle-instantclient-basic`, `oracle-instantclient-tools`, and `oracle-instantclient-sqlplus` RPM names. This avoids brittle, release-specific ZIP filenames. The Tools package supplies SQL*Loader and Oracle Data Pump utilities.
@@ -482,6 +500,17 @@ Instant Client installation uses `oracle-instantclient-release-26ai-el8` and the
 Release `v1.3.0` adds `scripts/manage-existing-stack.sh` for operating the
 existing resource OCIDs without a Terraform apply. By default it reads these
 current Terraform outputs:
+
+For the normal "start if required and connect" path, the v1.4.0 wrapper is
+simpler and automatically selects the correct workspace and key artifacts:
+
+```bash
+./scripts/start-and-connect.sh --tfvars terraform.tfvars --dry-run
+./scripts/start-and-connect.sh --tfvars terraform.tfvars
+```
+
+Use `manage-existing-stack.sh` directly for automation, explicit resource
+OCIDs, session-only creation without login, or `--stop-all`.
 
 ```bash
 terraform -chdir=terraform output -raw instance_id
@@ -624,45 +653,47 @@ Official command references are the OCI CLI pages for
 
 ## Expired Bastion sessions
 
-Sessions are deliberately temporary. Renew an expired or closed session and
-immediately regenerate the inventory and rerun Ansible:
+Sessions are deliberately temporary. When Compute is already `RUNNING` and ADB
+is already `AVAILABLE`, renew only the Terraform-managed session:
 
 ```bash
 ./scripts/renew-bastion-session.sh terraform.tfvars
-```
-
-Pass the matching private key as the second argument when it cannot be inferred
-from `bastion_session_public_key_path`:
-
-```bash
-./scripts/renew-bastion-session.sh terraform.tfvars /secure/keys/bastion_key
 ```
 
 The script targets and replaces the Terraform-managed session resource, creates
-a fresh plan instead of reusing a potentially stale plan, waits for the new session to be
-`ACTIVE`, and calls `scripts/run-ansible.sh`. That runner regenerates
-`ansible/inventory/hosts.yml` with the new session OCID before testing SSH and
-running the playbook. A refresh-only Terraform apply records any newer root
-outputs that were absent from an older state without changing OCI resources.
-Keep the required password and OCI environment variables exported in the same
-shell.
+a fresh plan instead of reusing a stale plan, waits for the new session to be
+`ACTIVE`, and performs a refresh-only apply so configured outputs are recorded.
+It does **not** run Ansible, start Compute or ADB, or open SSH.
 
-To renew without immediately running Ansible:
+Connect through the new session:
 
 ```bash
-RUN_ANSIBLE_AFTER_RENEWAL=false \
-./scripts/renew-bastion-session.sh terraform.tfvars
+./scripts/connect-oracle-server.sh
 ```
 
-You can then regenerate the inventory and run Ansible later with
-`./scripts/run-ansible.sh`. The equivalent manual renewal command is:
+When Compute or ADB may be stopped, use the start workflow instead; it starts
+them before creating the session and then opens SSH:
+
+```bash
+./scripts/start-and-connect.sh --tfvars terraform.tfvars
+```
+
+Run Ansible separately only when Linux provisioning or configuration must be
+changed:
+
+```bash
+./scripts/run-ansible.sh /secure/keys/bastion_key
+```
+
+The equivalent manual session replacement is:
 
 ```bash
 cd terraform
 terraform apply -var-file=terraform.tfvars -replace='module.bastion.oci_bastion_session.ansible[0]'
 ```
 
-Update the inventory with the new session OCID, or rerun `scripts/deploy.sh`.
+See [`scripts/README.md`](scripts/README.md) for exact responsibilities,
+artifact resolution, flags, tests, and troubleshooting.
 
 ## Retrying a partial destroy
 
@@ -694,7 +725,27 @@ OCI Bastion is the default here. Ansible can instead run from a controller that 
 - Store Terraform state in an encrypted, access-controlled backend because it can contain the database ADMIN password.
 - Rotate or revoke the OCI API signing key if the target server is compromised.
 
-## v1.3.0 latest changes
+## v1.4.0 latest changes
+
+Updated on 2026-08-08, this change separates session renewal, provisioning,
+and routine interactive access:
+
+- makes `renew-bastion-session.sh` session-only and removes automatic Ansible;
+- adds `start-and-connect.sh` to start stopped Compute/ADB resources, wait for
+  ready states, create a fresh Bastion session, and open SSH;
+- automatically resolves keys and resource information from existing
+  Terraform, connection-cache, and inventory artifacts;
+- preserves the tested `manage-existing-stack.sh` lifecycle engine and its
+  timestamped CSV reporting;
+- adds offline mock tests for renewal, artifact resolution, connect, and
+  dry-run behavior; and
+- adds [`scripts/README.md`](scripts/README.md), an explicit runbook for every
+  script.
+
+See [`RELEASE_NOTES_v1.4.0.md`](RELEASE_NOTES_v1.4.0.md) for compatibility and
+operator guidance.
+
+## v1.3.0 changes
 
 Released on 2026-08-07, this update adds safe lifecycle operations for the
 already-deployed stack:

@@ -2,7 +2,7 @@
 
 Initial review: 2026-07-21
 
-Latest review: 2026-08-07
+Latest review: 2026-08-08
 
 The source tree was reviewed before its initial GitHub publication. The audit
 found no embedded GitHub tokens, private-key blocks, AWS-style access keys,
@@ -13,6 +13,8 @@ Terraform state, or credential files in the publishable source set.
 Windows path after removing its private workspace segment. It does not identify
 the actual Git working copy used to publish this release. Lifecycle examples
 and offline tests use non-resolving OCIDs containing explicit `test` labels.
+The v1.4.0 session tests use mock Terraform/lifecycle binaries and placeholder
+key text; they do not contact OCI or contain usable credential material.
 
 The repository ignore policy excludes:
 

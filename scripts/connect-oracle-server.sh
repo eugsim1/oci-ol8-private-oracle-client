@@ -87,7 +87,8 @@ fi
 }
 [[ "$session_state" == "ACTIVE" ]] || {
   echo "The Bastion session is ${session_state:-unknown}, not ACTIVE." >&2
-  echo "Run ./scripts/renew-bastion-session.sh terraform.tfvars first." >&2
+  echo "If Compute and ADB are running, renew with ./scripts/renew-bastion-session.sh terraform.tfvars." >&2
+  echo "If either may be stopped, use ./scripts/start-and-connect.sh --tfvars terraform.tfvars." >&2
   exit 2
 }
 [[ "$session_id" == ocid1.bastionsession.* ]] || {

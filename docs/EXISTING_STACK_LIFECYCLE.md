@@ -3,6 +3,19 @@
 `scripts/manage-existing-stack.sh` operates resources that already exist. It
 does not create or change Terraform-managed infrastructure definitions.
 
+For a routine interactive login using the existing Terraform artifacts, prefer
+the v1.4.0 wrapper:
+
+```bash
+./scripts/start-and-connect.sh --tfvars terraform.tfvars --dry-run
+./scripts/start-and-connect.sh --tfvars terraform.tfvars
+```
+
+It selects the compartment workspace, resolves the key artifacts, and delegates
+the start/wait/session/connect operations documented below to this lifecycle
+engine. It never runs Ansible. Use `manage-existing-stack.sh` directly for
+explicit OCIDs, automation without an interactive login, or `--stop-all`.
+
 The default `--start` workflow is:
 
 1. Resolve the Compute, Autonomous Database, and Bastion OCIDs, region, target
@@ -239,20 +252,23 @@ Git. Protect and retain them according to the organization's audit policy. No
 key content, database password, wallet content, or OCI signing material is
 written.
 
-## 9. Offline test
+## 9. Offline tests
 
-The included test uses fake OCI responses and test OCIDs. It never contacts OCI:
+The included tests use fake OCI/Terraform responses and test OCIDs. They never
+contact OCI:
 
 ```bash
-bash -n scripts/manage-existing-stack.sh
-bash -n tests/test-manage-existing-stack.sh
+bash -n scripts/*.sh tests/*.sh
 ./tests/test-manage-existing-stack.sh
+./tests/test-bastion-session-scripts.sh
 ```
 
 The assertions cover a mutation-free dry run, stopped-to-running transitions,
 ADB `AVAILABLE`, session creation and activation, deletion of two previous
 sessions, graceful Compute shutdown, ADB shutdown, and three independent CSV
-reports.
+reports. The session-helper test additionally covers session-only renewal,
+workspace selection, adjacent/private cache/inventory key discovery, connection
+argument forwarding, and dry-run suppression of SSH.
 
 ## 10. Troubleshooting and rollback
 
