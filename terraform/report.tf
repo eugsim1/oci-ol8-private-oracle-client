@@ -45,6 +45,7 @@ locals {
     { resource_type = "autonomous_database", resource_name = module.autonomous_database.display_name, attribute = "id", value = module.autonomous_database.id },
     { resource_type = "autonomous_database", resource_name = module.autonomous_database.display_name, attribute = "db_name", value = module.autonomous_database.db_name },
     { resource_type = "autonomous_database", resource_name = module.autonomous_database.display_name, attribute = "state", value = module.autonomous_database.state },
+    { resource_type = "autonomous_database", resource_name = module.autonomous_database.display_name, attribute = "db_version", value = module.autonomous_database.db_version },
     { resource_type = "autonomous_database", resource_name = module.autonomous_database.display_name, attribute = "workload", value = module.autonomous_database.db_workload },
     { resource_type = "autonomous_database", resource_name = module.autonomous_database.display_name, attribute = "compute_model", value = module.autonomous_database.compute_model },
     { resource_type = "autonomous_database", resource_name = module.autonomous_database.display_name, attribute = "compute_count", value = tostring(module.autonomous_database.compute_count) },

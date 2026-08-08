@@ -41,6 +41,9 @@ bastion_plugin_wait_duration = "600s"
 # Supply the ADMIN password through the TF_VAR_adb_admin_password environment variable.
 adb_db_name                 = "ORAPRIV"
 adb_display_name            = "Private Autonomous Database"
+# Supported values: "19c" or "26ai". Use null to let OCI select its current
+# regional default. Confirm regional/workload availability before apply.
+adb_db_version              = "26ai"
 adb_workload                = "OLTP"
 adb_compute_count           = 2
 adb_storage_size_in_tbs     = 1

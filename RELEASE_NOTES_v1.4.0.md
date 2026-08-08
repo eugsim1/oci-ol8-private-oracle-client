@@ -10,6 +10,8 @@ Main-branch update dated 2026-08-08.
   argument. Provisioning remains an explicit `run-ansible.sh` operation.
 - `select-compartment-workspace.sh` respects `TERRAFORM_BIN`, improving
   testability and support for controlled Terraform installation paths.
+- The distribution's existing `adb_db_version` support is now preserved in the
+  Git history and accepts `19c`, `26ai`, or `null` for the OCI regional default.
 
 ## Added
 
@@ -22,7 +24,7 @@ Main-branch update dated 2026-08-08.
 - `scripts/README.md` documents every script, artifact source, decision path,
   flag, safety boundary, example, and troubleshooting check.
 - `tests/test-bastion-session-scripts.sh` validates session-only renewal,
-  Terraform replacement/refresh calls, artifact-based key resolution,
+  Terraform replacement/refresh calls, matching public/private key resolution,
   connect behavior, and mutation-free dry-run behavior using mocks.
 
 ## Operator guidance

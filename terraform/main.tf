@@ -112,6 +112,7 @@ module "autonomous_database" {
   db_name                               = local.effective_adb_db_name
   display_name                          = var.adb_display_name
   admin_password                        = var.adb_admin_password
+  db_version                            = var.adb_db_version
   db_workload                           = var.adb_workload
   compute_count                         = var.adb_compute_count
   data_storage_size_in_tbs              = var.adb_storage_size_in_tbs

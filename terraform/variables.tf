@@ -194,6 +194,17 @@ variable "adb_display_name" {
   type    = string
   default = "Private Autonomous Database"
 }
+variable "adb_db_version" {
+  type        = string
+  default     = null
+  nullable    = true
+  description = "Optional Oracle AI Database version for Autonomous Database creation. Set 19c or 26ai; null preserves OCI's regional service default."
+
+  validation {
+    condition     = var.adb_db_version == null ? true : contains(["19c", "26ai"], var.adb_db_version)
+    error_message = "adb_db_version must be null, 19c, or 26ai."
+  }
+}
 variable "adb_workload" {
   type    = string
   default = "OLTP"

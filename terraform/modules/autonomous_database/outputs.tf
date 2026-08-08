@@ -2,6 +2,7 @@ output "id" { value = oci_database_autonomous_database.this.id }
 output "db_name" { value = oci_database_autonomous_database.this.db_name }
 output "display_name" { value = oci_database_autonomous_database.this.display_name }
 output "state" { value = oci_database_autonomous_database.this.state }
+output "db_version" { value = oci_database_autonomous_database.this.db_version }
 output "private_endpoint" { value = oci_database_autonomous_database.this.private_endpoint }
 output "private_endpoint_ip" { value = oci_database_autonomous_database.this.private_endpoint_ip }
 output "network_security_group_id" { value = oci_core_network_security_group.database.id }

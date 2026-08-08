@@ -146,7 +146,9 @@ fi
 # Prove the controller-only connection cache is used when the private key next
 # to the Terraform public key is unavailable.
 cached_private_key="$test_dir/cached_bastion_key"
+cached_public_key="${cached_private_key}.pub"
 printf '%s\n' 'TEST-ONLY-CACHED-PRIVATE-KEY' > "$cached_private_key"
+printf '%s\n' 'ssh-ed25519 AAAATESTONLYCACHED bastion-cache-test' > "$cached_public_key"
 chmod 600 "$cached_private_key"
 connection_file="$test_dir/ssh-connection.env"
 printf 'SSH_PRIVATE_KEY=%q\n' "$cached_private_key" > "$connection_file"
@@ -162,10 +164,13 @@ LIFECYCLE_SCRIPT_BIN="$lifecycle_script" \
   --inventory-file "$test_dir/not-present.yml" \
   --dry-run
 grep -Fqx "$cached_private_key" "$lifecycle_log"
+grep -Fqx "$cached_public_key" "$lifecycle_log"
 
 # Prove the generated inventory is the final private-key fallback.
 inventory_private_key="$test_dir/inventory_bastion_key"
+inventory_public_key="${inventory_private_key}.pub"
 printf '%s\n' 'TEST-ONLY-INVENTORY-PRIVATE-KEY' > "$inventory_private_key"
+printf '%s\n' 'ssh-ed25519 AAAATESTONLYINVENTORY bastion-inventory-test' > "$inventory_public_key"
 chmod 600 "$inventory_private_key"
 inventory_file="$test_dir/hosts.yml"
 printf '    ansible_ssh_private_key_file: "%s"\n' "$inventory_private_key" > "$inventory_file"
@@ -180,6 +185,26 @@ LIFECYCLE_SCRIPT_BIN="$lifecycle_script" \
   --inventory-file "$inventory_file" \
   --dry-run
 grep -Fqx "$inventory_private_key" "$lifecycle_log"
+grep -Fqx "$inventory_public_key" "$lifecycle_log"
+
+# An explicit pair overrides the Terraform key artifacts together.
+explicit_private_key="$test_dir/explicit_bastion_key"
+explicit_public_key="$test_dir/explicit_bastion_key.custom.pub"
+printf '%s\n' 'TEST-ONLY-EXPLICIT-PRIVATE-KEY' > "$explicit_private_key"
+printf '%s\n' 'ssh-ed25519 AAAATESTONLYEXPLICIT bastion-explicit-test' > "$explicit_public_key"
+chmod 600 "$explicit_private_key"
+
+: > "$lifecycle_log"
+TERRAFORM_BIN="$mock_terraform" \
+WORKSPACE_SELECTOR_BIN="$workspace_selector" \
+LIFECYCLE_SCRIPT_BIN="$lifecycle_script" \
+"$project_dir/scripts/start-and-connect.sh" \
+  --tfvars "$tfvars_file" \
+  --ssh-private-key "$explicit_private_key" \
+  --ssh-public-key "$explicit_public_key" \
+  --dry-run
+grep -Fqx "$explicit_private_key" "$lifecycle_log"
+grep -Fqx "$explicit_public_key" "$lifecycle_log"
 
 "$project_dir/scripts/renew-bastion-session.sh" --help >/dev/null
 "$project_dir/scripts/start-and-connect.sh" --help >/dev/null

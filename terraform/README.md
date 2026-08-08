@@ -155,6 +155,43 @@ terraform apply tfplan
 terraform output
 ```
 
+### Autonomous Database version
+
+Choose the version in `terraform.tfvars`:
+
+```hcl
+adb_db_version = "19c"
+```
+
+or:
+
+```hcl
+adb_db_version = "26ai"
+```
+
+Only `19c`, `26ai`, or `null` are accepted. `null` omits the version from the
+create request and lets OCI use its current regional default. Verify availability
+for the selected workload and region before applying:
+
+```bash
+oci db autonomous-db-version list \
+  --compartment-id "$COMPARTMENT_OCID" \
+  --db-workload OLTP \
+  --region eu-frankfurt-1 \
+  --all \
+  --query 'data[].version'
+```
+
+Confirm the actual service-reported version after apply:
+
+```bash
+terraform output -raw autonomous_database_version
+```
+
+Changing the value for an existing database is a database-version operation.
+Review the plan and maintenance implications before applying; `26ai` to `19c`
+must not be treated as a Terraform rollback.
+
 Inspect the discovered and selected domains with:
 
 ```bash
@@ -178,7 +215,7 @@ terraform output -raw terraform_csv_report
 
 The report contains network identifiers, Compute OCID/name/state/image/shape/OCPUs/memory/boot size/private and public IP/IMDS mode, Bastion and session identifiers/states/plugin status/SSH command, Autonomous Database configuration/private endpoint/private IP/NSG/TLS descriptor, Database Tools connection and private-endpoint details, and Vault/key/secret OCIDs. Passwords, secret contents, wallet contents, and private keys are deliberately excluded. The file is refreshed in place on each apply.
 
-`modules/autonomous_database` uses the recommended ECPU compute model and creates an NSG ingress rule for TCP 1522 from the VCN CIDR. By default it permits both one-way TLS and mTLS: Database Tools consumes the generated one-way TLS `HIGH` descriptor, while downloaded-wallet clients can continue using mTLS. Configure its name, workload, compute, storage, license model, endpoint label, and TLS policy in `terraform.tfvars`.
+`modules/autonomous_database` uses the recommended ECPU compute model and creates an NSG ingress rule for TCP 1522 from the VCN CIDR. By default it permits both one-way TLS and mTLS: Database Tools consumes the generated one-way TLS `HIGH` descriptor, while downloaded-wallet clients can continue using mTLS. Configure its name, database version, workload, compute, storage, license model, endpoint label, and TLS policy in `terraform.tfvars`.
 
 The password is intentionally absent from the example file. Terraform marks it sensitive, but sensitive values can still exist in state; use an encrypted remote backend with tightly scoped access.
 

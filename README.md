@@ -266,6 +266,41 @@ terraform plan -var-file=terraform.tfvars -out=tfplan
 terraform apply tfplan
 ```
 
+### Select Oracle Database 19c or Oracle AI Database 26ai
+
+Set `adb_db_version` in `terraform/terraform.tfvars` before the first apply:
+
+```hcl
+# Create a 19c Autonomous Database
+adb_db_version = "19c"
+```
+
+or:
+
+```hcl
+# Create a 26ai Autonomous AI Database
+adb_db_version = "26ai"
+```
+
+The validation accepts only `"19c"`, `"26ai"`, or `null`. With `null`,
+Terraform omits `db_version` and OCI selects its current regional default. The
+supplied example explicitly selects `26ai`. Confirm that the selected version is
+available for the workload and region before applying:
+
+```bash
+oci db autonomous-db-version list \
+  --compartment-id "$COMPARTMENT_OCID" \
+  --db-workload OLTP \
+  --region eu-frankfurt-1 \
+  --all \
+  --query 'data[].version'
+```
+
+For an existing database, changing the value is a database-version operation.
+Review `terraform plan` and the OCI maintenance requirements first. Changing
+from `26ai` to `19c` is not a rollback procedure; use an Oracle-supported
+restore, clone, or migration plan when rollback is required.
+
 Verify that no public address exists and obtain the Bastion command:
 
 ```bash
@@ -278,6 +313,7 @@ terraform output bastion_plugin_status
 terraform output bastion_plugin_message
 terraform output autonomous_database_private_endpoint
 terraform output autonomous_database_private_ip
+terraform output autonomous_database_version
 terraform output -raw terraform_csv_report
 ```
 

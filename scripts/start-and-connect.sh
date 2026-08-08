@@ -11,6 +11,7 @@ workspace_selector="${WORKSPACE_SELECTOR_BIN:-$root_dir/scripts/select-compartme
 lifecycle_script="${LIFECYCLE_SCRIPT_BIN:-$root_dir/scripts/manage-existing-stack.sh}"
 
 ssh_private_key="${SSH_PRIVATE_KEY_PATH:-}"
+ssh_public_key="${SSH_PUBLIC_KEY_PATH:-}"
 profile="${OCI_CLI_PROFILE:-DEFAULT}"
 auth_mode="${OCI_AUTH_MODE:-}"
 target_os_user="oracle"
@@ -35,6 +36,7 @@ Artifact and workspace options:
   --tfvars PATH                 Terraform variables file; default terraform.tfvars
   --terraform-dir PATH          Terraform root; default PROJECT/terraform
   --ssh-private-key PATH        Matching private key; otherwise auto-detected
+  --ssh-public-key PATH         Matching public key; otherwise auto-detected
   --connection-file PATH        run-ansible connection cache fallback
   --inventory-file PATH         generated Ansible inventory fallback
   --skip-workspace-selection    use the currently selected Terraform workspace
@@ -57,6 +59,11 @@ Private-key lookup order:
   3. Terraform bastion_session_public_key_path with .pub removed
   4. reports/ssh-connection.env
   5. ansible/inventory/hosts.yml
+
+Public-key lookup order:
+  1. --ssh-public-key or SSH_PUBLIC_KEY_PATH
+  2. the selected private key plus .pub
+  3. Terraform's public key only when its adjacent private key was selected
 EOF
 }
 
@@ -71,6 +78,7 @@ while (( $# > 0 )); do
     --tfvars) require_value "$1" "${2:-}"; tfvars_file="$2"; shift 2 ;;
     --terraform-dir) require_value "$1" "${2:-}"; terraform_dir="$2"; shift 2 ;;
     --ssh-private-key) require_value "$1" "${2:-}"; ssh_private_key="$2"; shift 2 ;;
+    --ssh-public-key) require_value "$1" "${2:-}"; ssh_public_key="$2"; shift 2 ;;
     --connection-file) require_value "$1" "${2:-}"; connection_file="$2"; shift 2 ;;
     --inventory-file) require_value "$1" "${2:-}"; inventory_file="$2"; shift 2 ;;
     --skip-workspace-selection) skip_workspace_selection=true; shift ;;
@@ -116,6 +124,7 @@ resolve_readable_path() {
 
 session_public_key_path="$(tf_output_optional bastion_session_public_key_path)"
 session_public_key_path="${session_public_key_path%$'\r'}"
+terraform_private_key="$(resolve_readable_path "${session_public_key_path%.pub}" || true)"
 
 if [[ -n "$ssh_private_key" ]]; then
   requested_private_key="$ssh_private_key"
@@ -124,8 +133,7 @@ if [[ -n "$ssh_private_key" ]]; then
     exit 1
   }
 else
-  inferred_private_key="${session_public_key_path%.pub}"
-  ssh_private_key="$(resolve_readable_path "$inferred_private_key" || true)"
+  ssh_private_key="$terraform_private_key"
 
   if [[ -z "$ssh_private_key" && -r "$connection_file" ]]; then
     cached_private_key=""
@@ -159,12 +167,21 @@ fi
   exit 1
 }
 
-ssh_public_key="$(resolve_readable_path "$session_public_key_path" || true)"
-if [[ -z "$ssh_public_key" ]]; then
+if [[ -n "$ssh_public_key" ]]; then
+  requested_public_key="$ssh_public_key"
+  ssh_public_key="$(resolve_readable_path "$requested_public_key")" || {
+    echo "The explicitly selected SSH public key is not readable: $requested_public_key" >&2
+    exit 1
+  }
+else
   ssh_public_key="$(resolve_readable_path "${ssh_private_key}.pub" || true)"
+  if [[ -z "$ssh_public_key" && -n "$terraform_private_key" && "$ssh_private_key" == "$terraform_private_key" ]]; then
+    ssh_public_key="$(resolve_readable_path "$session_public_key_path" || true)"
+  fi
 fi
 [[ -n "$ssh_public_key" && -r "$ssh_public_key" ]] || {
-  echo "Could not resolve the Bastion SSH public key from Terraform or ${ssh_private_key}.pub." >&2
+  echo "Could not resolve a public key matching the selected private key: $ssh_private_key" >&2
+  echo "Create ${ssh_private_key}.pub, or pass --ssh-public-key / set SSH_PUBLIC_KEY_PATH." >&2
   exit 1
 }
 

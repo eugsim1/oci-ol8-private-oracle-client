@@ -60,6 +60,7 @@ output "boot_volume_size_in_gbs" { value = var.boot_volume_size_in_gbs }
 output "autonomous_database_id" { value = module.autonomous_database.id }
 output "autonomous_database_name" { value = module.autonomous_database.db_name }
 output "autonomous_database_state" { value = module.autonomous_database.state }
+output "autonomous_database_version" { value = module.autonomous_database.db_version }
 output "autonomous_database_private_endpoint" { value = module.autonomous_database.private_endpoint }
 output "autonomous_database_private_ip" { value = module.autonomous_database.private_endpoint_ip }
 output "autonomous_database_tls_high_connection_string" { value = module.autonomous_database.tls_high_connection_string }

@@ -8,6 +8,17 @@ variable "admin_password" {
   type      = string
   sensitive = true
 }
+variable "db_version" {
+  type        = string
+  default     = null
+  nullable    = true
+  description = "Optional Oracle AI Database version. Set 19c or 26ai; null lets OCI select the current regional default."
+
+  validation {
+    condition     = var.db_version == null ? true : contains(["19c", "26ai"], var.db_version)
+    error_message = "db_version must be null, 19c, or 26ai."
+  }
+}
 variable "db_workload" { type = string }
 variable "compute_count" { type = number }
 variable "data_storage_size_in_tbs" { type = number }
