@@ -522,10 +522,12 @@ artifact-driven workflow instead:
 ```
 
 It selects the compartment workspace, resolves the existing key artifacts,
-starts only stopped resources, waits for Compute `RUNNING` and ADB `AVAILABLE`,
-creates a fresh Bastion session, writes a timestamped CSV, and opens SSH. It
-does not run Ansible. See [`scripts/README.md`](scripts/README.md) for the
-decision table and documentation for every script.
+starts only stopped resources, waits for Compute `RUNNING`, prints numbered
+polling iterations until the Compute instance's `Bastion` plugin is `RUNNING`,
+then waits for ADB `AVAILABLE`, creates a fresh Bastion session, writes a
+timestamped CSV, and opens SSH. It does not run Ansible. See
+[`scripts/README.md`](scripts/README.md) for the decision table and
+documentation for every script.
 
 The role intentionally separates required package installation from full OS patching. `oracle_update_all_packages` defaults to `false`, preventing unrelated enabled-repository conflicts from blocking Python, OCI CLI, and Instant Client setup. It installs Python 3.12 as the latest OL8.10 application runtime and uses Python 3.11 for the OCI CLI virtual environment according to Oracle's OL8 support matrix.
 
@@ -557,11 +559,14 @@ terraform -chdir=terraform output -raw region
 terraform -chdir=terraform output -raw bastion_session_public_key_path
 ```
 
-The start workflow sends both start requests, waits for Compute `RUNNING` and
-Autonomous Database `AVAILABLE`, then creates a fresh OCI Bastion managed SSH
-session and waits for `ACTIVE`. `AVAILABLE` is OCI's running/ready lifecycle
-state for Autonomous Database. The script prints a complete OpenSSH ProxyCommand
-and exits; add `--connect` only when an interactive login is wanted.
+The start workflow sends both start requests, waits for Compute `RUNNING`, and
+then queries the OCI Compute Instance Agent once per polling interval. Each
+console iteration shows the current `Bastion` plugin state. Session creation
+cannot begin until that state is `RUNNING`. The workflow then waits for
+Autonomous Database `AVAILABLE`, creates a fresh OCI Bastion managed SSH session,
+and waits for `ACTIVE`. `AVAILABLE` is OCI's running/ready lifecycle state for
+Autonomous Database. The script prints a complete OpenSSH ProxyCommand and
+exits; add `--connect` only when an interactive login is wanted.
 
 Run it from an **external Linux controller**. The controller needs Bash, OCI CLI,
 Terraform when reading state outputs, and OpenSSH for `--connect`. Confirm the
@@ -619,7 +624,7 @@ To use an authorized controller instance principal:
 Preview first, because this action can disconnect other operators:
 
 ```bash
-./scripts/manage-existing-stack.sh --stop-all --dry-run
+./scripts/stop-all.sh --tfvars terraform.tfvars --dry-run
 ```
 
 Then close **every non-deleted session returned for the selected Bastion**,
@@ -627,13 +632,13 @@ stop Autonomous Database, gracefully stop Compute with `SOFTSTOP`, and wait for
 both services to report `STOPPED`:
 
 ```bash
-./scripts/manage-existing-stack.sh --stop-all
+./scripts/stop-all.sh --tfvars terraform.tfvars
 ```
 
 For an approved emergency hard power-off only:
 
 ```bash
-./scripts/manage-existing-stack.sh --stop-all --force-stop
+./scripts/stop-all.sh --tfvars terraform.tfvars --force-stop
 ```
 
 Do not execute `--stop-all` from the Compute instance being managed. Its own
@@ -652,6 +657,7 @@ shutdown can terminate the process before final validation and CSV completion.
 | `--auth MODE` | Select an OCI CLI auth mode such as `instance_principal`. |
 | `--session-ttl SECONDS` | Set session lifetime from 30 through 10800 seconds. |
 | `--wait-seconds SECONDS` | Set state wait timeout; default is 3600. |
+| `--bastion-plugin-wait-seconds SECONDS` | Set the Bastion plugin readiness timeout; default is 600. |
 | `--poll-seconds SECONDS` | Set poll interval; default is 10. |
 | `--report-dir PATH` | Override the default `reports/` CSV destination. |
 

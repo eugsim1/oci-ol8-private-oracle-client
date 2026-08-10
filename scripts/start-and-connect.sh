@@ -19,6 +19,7 @@ target_port=22
 session_ttl=10800
 wait_seconds=3600
 poll_seconds=10
+bastion_plugin_wait_seconds=600
 report_dir="$root_dir/reports"
 dry_run=false
 skip_workspace_selection=false
@@ -49,6 +50,8 @@ OCI and connection options:
   --session-ttl SECONDS         Bastion TTL, 30-10800; default 10800
   --wait-seconds SECONDS        lifecycle timeout; default 3600
   --poll-seconds SECONDS        polling interval; default 10
+  --bastion-plugin-wait-seconds SECONDS
+                                Bastion plugin timeout; default 600
   --report-dir PATH             timestamped CSV directory; default PROJECT/reports
   --dry-run                     inspect and report only; do not start or connect
   -h, --help
@@ -89,6 +92,7 @@ while (( $# > 0 )); do
     --session-ttl) require_value "$1" "${2:-}"; session_ttl="$2"; shift 2 ;;
     --wait-seconds) require_value "$1" "${2:-}"; wait_seconds="$2"; shift 2 ;;
     --poll-seconds) require_value "$1" "${2:-}"; poll_seconds="$2"; shift 2 ;;
+    --bastion-plugin-wait-seconds) require_value "$1" "${2:-}"; bastion_plugin_wait_seconds="$2"; shift 2 ;;
     --report-dir) require_value "$1" "${2:-}"; report_dir="$2"; shift 2 ;;
     --dry-run) dry_run=true; shift ;;
     -h|--help) usage; exit 0 ;;
@@ -196,6 +200,7 @@ lifecycle_args=(
   --session-ttl "$session_ttl"
   --wait-seconds "$wait_seconds"
   --poll-seconds "$poll_seconds"
+  --bastion-plugin-wait-seconds "$bastion_plugin_wait_seconds"
   --report-dir "$report_dir"
 )
 [[ -n "$auth_mode" ]] && lifecycle_args+=(--auth "$auth_mode")

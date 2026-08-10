@@ -25,6 +25,7 @@ target_port=22
 session_ttl=10800
 wait_seconds=3600
 poll_seconds=10
+bastion_plugin_wait_seconds=600
 session_display_name=""
 
 usage() {
@@ -63,6 +64,8 @@ OCI and session options:
   --session-display-name NAME
   --wait-seconds SECONDS        Overall state wait timeout (default: 3600).
   --poll-seconds SECONDS        State polling interval (default: 10).
+  --bastion-plugin-wait-seconds SECONDS
+                                Bastion plugin timeout (default: 600).
   --report-dir PATH             CSV destination (default: PROJECT/reports).
   -h, --help
 
@@ -103,6 +106,7 @@ while (( $# > 0 )); do
     --session-display-name) require_value "$1" "${2:-}"; session_display_name="$2"; shift 2 ;;
     --wait-seconds) require_value "$1" "${2:-}"; wait_seconds="$2"; shift 2 ;;
     --poll-seconds) require_value "$1" "${2:-}"; poll_seconds="$2"; shift 2 ;;
+    --bastion-plugin-wait-seconds) require_value "$1" "${2:-}"; bastion_plugin_wait_seconds="$2"; shift 2 ;;
     --report-dir) require_value "$1" "${2:-}"; report_dir="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
@@ -123,6 +127,10 @@ done
 }
 [[ "$poll_seconds" =~ ^[1-9][0-9]*$ ]] || {
   echo "--poll-seconds must be a positive integer." >&2
+  exit 2
+}
+[[ "$bastion_plugin_wait_seconds" =~ ^[1-9][0-9]*$ ]] || {
+  echo "--bastion-plugin-wait-seconds must be a positive integer." >&2
   exit 2
 }
 if [[ "$action" == "stop-all" && "$connect_after_start" == "true" ]]; then
@@ -249,11 +257,21 @@ capture_oci() {
   local variable_name="$1"
   local description="$2"
   shift 2
-  local value
-  if ! value="$(oci_cli "$@" 2>&1)"; then
-    fail "$description failed: $value"
+  local value stderr_file stderr_output
+  if ! stderr_file="$(mktemp "${TMPDIR:-/tmp}/oci-cli-stderr.XXXXXX")"; then
+    fail "$description failed: could not create a temporary stderr file"
     return 1
   fi
+  if ! value="$(oci_cli "$@" 2>"$stderr_file")"; then
+    stderr_output="$(<"$stderr_file")"
+    rm -f "$stderr_file"
+    fail "$description failed: $stderr_output"
+    return 1
+  fi
+  if [[ -s "$stderr_file" ]]; then
+    cat "$stderr_file" >&2
+  fi
+  rm -f "$stderr_file"
   value="$(clean_value "$value")"
   printf -v "$variable_name" '%s' "$value"
 }
@@ -270,6 +288,34 @@ get_adb_state() {
   capture_oci "$variable_name" "Reading Autonomous Database state" \
     db autonomous-database get --autonomous-database-id "$autonomous_database_id" \
     --query 'data."lifecycle-state"' --raw-output
+}
+
+get_compute_compartment_id() {
+  local variable_name="$1"
+  capture_oci "$variable_name" "Reading Compute compartment" \
+    compute instance get --instance-id "$instance_id" \
+    --query 'data."compartment-id"' --raw-output
+}
+
+get_bastion_plugin_status() {
+  local variable_name="$1"
+  local compartment_id plugin_status
+  get_compute_compartment_id compartment_id || return 1
+  [[ "$compartment_id" == ocid1.compartment.* || "$compartment_id" == ocid1.tenancy.* ]] || {
+    fail "Compute returned an invalid compartment OCID while checking the Bastion plugin: ${compartment_id:-empty}"
+    return 1
+  }
+  capture_oci plugin_status "Reading Bastion plugin status" \
+    instance-agent plugin list \
+    --compartment-id "$compartment_id" \
+    --instanceagent-id "$instance_id" \
+    --name Bastion \
+    --query 'data[0].status' \
+    --raw-output || return 1
+  case "$plugin_status" in
+    ""|None|null) plugin_status="NOT_REPORTED" ;;
+  esac
+  printf -v "$variable_name" '%s' "$plugin_status"
 }
 
 get_session_state_optional() {
@@ -301,6 +347,29 @@ wait_for_resource_state() {
     sleep "$poll_seconds"
   done
   fail "$resource_type did not reach $expected_state within ${wait_seconds}s; final state: ${current_state:-unknown}"
+}
+
+wait_for_bastion_plugin_running() {
+  local deadline=$((SECONDS + bastion_plugin_wait_seconds))
+  local iteration=0 status="NOT_REPORTED"
+  while (( SECONDS < deadline )); do
+    iteration=$((iteration + 1))
+    get_bastion_plugin_status status || return 1
+    echo "Bastion plugin check $iteration: status=$status; expected=RUNNING"
+    case "$status" in
+      RUNNING)
+        record_event "oracle_cloud_agent_plugin" "$instance_id" "wait" "" "$status" "SUCCEEDED" "Bastion plugin reached RUNNING after $iteration iteration(s)."
+        echo "Bastion plugin is RUNNING after $iteration iteration(s)."
+        return 0
+        ;;
+      INVALID|NOT_SUPPORTED)
+        fail "Bastion plugin cannot become ready from status $status. Check the Oracle Cloud Agent configuration."
+        return 1
+        ;;
+    esac
+    sleep "$poll_seconds"
+  done
+  fail "Bastion plugin did not reach RUNNING within ${bastion_plugin_wait_seconds}s after $iteration iteration(s); final status: $status"
 }
 
 run_mutation() {
@@ -347,12 +416,15 @@ start_resources() {
   esac
 
   if [[ "$dry_run" == "true" ]]; then
+    record_event "oracle_cloud_agent_plugin" "$instance_id" "wait" "CURRENT" "RUNNING" "PLANNED" "Would poll the Bastion plugin and print each iteration before creating a session."
+    echo "Dry run: would wait for the Bastion plugin to reach RUNNING before creating a session."
     record_event "bastion_session" "$bastion_id" "create" "NOT_CREATED" "ACTIVE" "PLANNED" "Would create a managed SSH session after both resources become ready."
     echo "Dry run complete; no OCI resource was changed."
     return 0
   fi
 
   wait_for_resource_state "compute" "$instance_id" "RUNNING" get_compute_state
+  wait_for_bastion_plugin_running
   wait_for_resource_state "autonomous_database" "$autonomous_database_id" "AVAILABLE" get_adb_state
   create_bastion_session
 }

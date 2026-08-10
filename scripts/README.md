@@ -10,6 +10,7 @@ external Linux controller with the repository checkout and Terraform state.
 |---|---|---:|---:|---:|---:|
 | First deployment | `deploy.sh` | Terraform-managed | Yes | Yes | No |
 | Start stopped services and log in | `start-and-connect.sh` | Yes, if stopped | Fresh session | No | Yes |
+| Stop all services | `stop-all.sh` | Stops both | Closes all | No | No |
 | Renew only the Terraform session | `renew-bastion-session.sh` | No | Replaces session | No | No |
 | Full lifecycle control or automation | `manage-existing-stack.sh` | Optional | Optional | No | Optional |
 | Connect through the current active session | `connect-oracle-server.sh` | No | No | No | Yes |
@@ -65,10 +66,13 @@ The workflow:
 3. Reads existing resource OCIDs, private IP, and region from Terraform.
 4. Starts Compute only when it is `STOPPED`.
 5. Starts Autonomous Database only when it is `STOPPED`.
-6. Waits for Compute `RUNNING` and ADB `AVAILABLE`.
-7. Creates a fresh managed SSH session and waits for `ACTIVE`.
-8. Opens interactive SSH to `oracle@<private-ip>` through OCI Bastion.
-9. Writes the lifecycle events to `reports/stack-lifecycle-*.csv`.
+6. Waits for Compute to reach `RUNNING`.
+7. Polls the Compute instance's `Bastion` plugin until it reaches `RUNNING`,
+   printing each numbered check to the console.
+8. Waits for ADB to reach `AVAILABLE`.
+9. Creates a fresh managed SSH session and waits for `ACTIVE`.
+10. Opens interactive SSH to `oracle@<private-ip>` through OCI Bastion.
+11. Writes the lifecycle events to `reports/stack-lifecycle-*.csv`.
 
 No Ansible playbook runs. Preview all OCI mutations first:
 
@@ -88,6 +92,7 @@ Use an explicit key or OCI authentication mode when required:
   --profile DEFAULT \
   --session-ttl 10800 \
   --wait-seconds 3600 \
+  --bastion-plugin-wait-seconds 600 \
   --poll-seconds 10
 ```
 
@@ -106,7 +111,21 @@ cached/inventory private key with an unrelated Terraform public-key artifact.
 Run `./scripts/start-and-connect.sh --help` for all artifact, workspace, OCI,
 SSH, timeout, dry-run, and report flags.
 
-## 3. Renew only the Terraform-managed Bastion session
+## 3. Stop Autonomous Database and Compute
+
+Run the focused stop wrapper from the external Linux controller:
+
+```bash
+./scripts/stop-all.sh --tfvars terraform.tfvars --dry-run
+./scripts/stop-all.sh --tfvars terraform.tfvars
+```
+
+It selects the compartment-safe Terraform workspace, closes all non-deleted
+sessions for the selected Bastion, stops Autonomous Database, and gracefully
+stops Compute. Use `--force-stop` only for an approved hard power-off. Do not
+run this command from the Compute node that it will stop.
+
+## 4. Renew only the Terraform-managed Bastion session
 
 Use renewal when Compute is already `RUNNING`, ADB is already `AVAILABLE`, and
 only the session recorded in Terraform has expired:
@@ -145,7 +164,7 @@ environment flags are:
 | `TERRAFORM_BIN` | `terraform` | Terraform executable/path |
 | `WORKSPACE_SELECTOR_BIN` | Project selector | Test/advanced selector override |
 
-## 4. Full lifecycle operations
+## 5. Full lifecycle operations
 
 `manage-existing-stack.sh` is the underlying lifecycle engine. It supports
 explicit test/imported OCIDs as well as Terraform outputs.
@@ -164,7 +183,7 @@ the Compute instance being stopped. See
 [`../docs/EXISTING_STACK_LIFECYCLE.md`](../docs/EXISTING_STACK_LIFECYCLE.md) for
 all flags, IAM policies, test OCIDs, CSV fields, failure handling, and rollback.
 
-## 5. Connect through the current session
+## 6. Connect through the current session
 
 ```bash
 ./scripts/connect-oracle-server.sh
@@ -175,7 +194,7 @@ This script prefers current Terraform outputs and falls back to
 unless the selected session is `ACTIVE`. It does not start resources or create
 a session.
 
-## 6. Run Ansible separately
+## 7. Run Ansible separately
 
 ```bash
 ./scripts/run-ansible.sh /secure/keys/bastion_key
@@ -187,7 +206,7 @@ provisioned again. Session renewal and routine login do not require Ansible.
 See [`../ansible/README.md`](../ansible/README.md) for its password and feature
 flags.
 
-## 7. Open the VNC tunnel
+## 8. Open the VNC tunnel
 
 ```bash
 VNC_LOCAL_PORT=5901 \
@@ -197,7 +216,7 @@ VNC_LOCAL_PORT=5901 \
 The current Terraform-managed session must be `ACTIVE`. The script binds only
 the local controller port and forwards to `127.0.0.1:5901` on the private host.
 
-## 8. Select the Terraform workspace
+## 9. Select the Terraform workspace
 
 ```bash
 ./scripts/select-compartment-workspace.sh terraform.tfvars
@@ -230,6 +249,7 @@ shellcheck scripts/*.sh tests/*.sh
 | Terraform output is empty | Confirm the selected tfvars/workspace and state backend. |
 | Private key cannot be resolved | Pass `--ssh-private-key`; confirm the matching `.pub` file exists. |
 | Compute remains `STOPPED` | Check OCI CLI identity, instance state, and `manage instance-family` permission. |
+| Bastion plugin never reaches `RUNNING` | Check Oracle Cloud Agent and its Bastion plugin on the Compute node; increase `--bastion-plugin-wait-seconds` if startup legitimately needs longer. |
 | ADB remains `STOPPED` | Check database state and `manage autonomous-database-family` permission. |
 | Session creation fails | Confirm Bastion target subnet, agent/plugin status, public key, NSGs, and session IAM. |
 | SSH times out after `ACTIVE` | Check private IP, port 22 NSG rules, `sshd`, target username, and matching key. |

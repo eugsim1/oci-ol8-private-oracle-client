@@ -22,12 +22,15 @@ The default `--start` workflow is:
    private IP, and Bastion session public key from the current Terraform state.
 2. Inspect both lifecycle states.
 3. Send Compute `START` and Autonomous Database `start` only when stopped.
-4. Wait for Compute `RUNNING` and Autonomous Database `AVAILABLE`. OCI calls the
-   running/ready Autonomous Database state `AVAILABLE`, not `RUNNING`.
-5. Create an OCI Bastion `MANAGED_SSH` session to `oracle@PRIVATE_IP:22` and wait
+4. Wait for Compute `RUNNING`.
+5. Poll the Compute Instance Agent and print each numbered iteration until its
+   `Bastion` plugin reaches `RUNNING`.
+6. Wait for Autonomous Database `AVAILABLE`. OCI calls the running/ready
+   Autonomous Database state `AVAILABLE`, not `RUNNING`.
+7. Create an OCI Bastion `MANAGED_SSH` session to `oracle@PRIVATE_IP:22` and wait
    for it to become `ACTIVE`.
-6. Print a usable OpenSSH command. `--connect` also opens the interactive login.
-7. Record every inspected, requested, completed, planned, or failed event in a
+8. Print a usable OpenSSH command. `--connect` also opens the interactive login.
+9. Record every inspected, requested, completed, planned, or failed event in a
    timestamped CSV under `reports/`.
 
 The explicit `--stop-all` workflow closes every non-deleted session returned by
@@ -176,13 +179,13 @@ For a controller using an instance principal:
 First preview the shutdown:
 
 ```bash
-./scripts/manage-existing-stack.sh --stop-all --dry-run
+./scripts/stop-all.sh --tfvars terraform.tfvars --dry-run
 ```
 
 Then perform it:
 
 ```bash
-./scripts/manage-existing-stack.sh --stop-all
+./scripts/stop-all.sh --tfvars terraform.tfvars
 ```
 
 `--stop-all` means all non-deleted sessions returned for the selected Bastion,
@@ -192,7 +195,7 @@ shut down gracefully. During an approved emergency only, explicitly request
 hard power-off:
 
 ```bash
-./scripts/manage-existing-stack.sh --stop-all --force-stop
+./scripts/stop-all.sh --tfvars terraform.tfvars --force-stop
 ```
 
 If a resource is already in its desired state, the report records `NO_CHANGE`.
@@ -224,6 +227,7 @@ and remain visible in the CSV.
 | `--session-ttl` | `10800` | Bastion lifetime in seconds, 30-10800. |
 | `--session-display-name` | timestamped | Name of the new Bastion session. |
 | `--wait-seconds` | `3600` | Maximum state wait. |
+| `--bastion-plugin-wait-seconds` | `600` | Maximum wait for the Compute `Bastion` plugin to reach `RUNNING`. |
 | `--poll-seconds` | `10` | State polling interval. |
 | `--report-dir` | `PROJECT/reports` | Timestamped CSV directory. |
 
@@ -264,9 +268,10 @@ bash -n scripts/*.sh tests/*.sh
 ```
 
 The assertions cover a mutation-free dry run, stopped-to-running transitions,
-ADB `AVAILABLE`, session creation and activation, deletion of two previous
-sessions, graceful Compute shutdown, ADB shutdown, and three independent CSV
-reports. The session-helper test additionally covers session-only renewal,
+numbered `Bastion` plugin polling through `RUNNING`, ADB `AVAILABLE`, session
+creation and activation, deletion of two previous sessions, graceful Compute
+shutdown, ADB shutdown, and three independent CSV reports. The session-helper
+test additionally covers session-only renewal,
 workspace selection, adjacent/private cache/inventory key discovery, connection
 argument forwarding, and dry-run suppression of SSH.
 

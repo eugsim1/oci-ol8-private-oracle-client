@@ -1,0 +1,24 @@
+name: linux-ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  shell-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Validate shell syntax
+        run: bash -n scripts/*.sh tests/*.sh
+
+      - name: Test lifecycle engine
+        run: ./tests/test-manage-existing-stack.sh
+
+      - name: Test Bastion session wrappers
+        run: ./tests/test-bastion-session-scripts.sh

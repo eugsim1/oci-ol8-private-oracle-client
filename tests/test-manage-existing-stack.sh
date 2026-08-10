@@ -11,6 +11,7 @@ mock_report_dir="$test_dir/reports"
 mkdir -p "$mock_state_dir" "$mock_report_dir"
 printf 'STOPPED\n' > "$mock_state_dir/compute"
 printf 'STOPPED\n' > "$mock_state_dir/adb"
+printf '0\n' > "$mock_state_dir/plugin-calls"
 : > "$mock_state_dir/deleted-sessions"
 
 public_key="$test_dir/bastion_key.pub"
@@ -41,9 +42,21 @@ value_after() {
   return 1
 }
 
+emit_warning() {
+  if [[ "${MOCK_OCI_WARN:-false}" == "true" ]]; then
+    printf 'WARNING: simulated OCI CLI warning on stderr.\n' >&2
+  fi
+}
+
 case "${1:-} ${2:-} ${3:-}" in
   "compute instance get")
-    cat "$state_dir/compute"
+    emit_warning
+    query="$(value_after --query "$@" || true)"
+    if [[ "$query" == *compartment-id* ]]; then
+      printf 'ocid1.compartment.oc1..testcompartment\n'
+    else
+      cat "$state_dir/compute"
+    fi
     ;;
   "compute instance action")
     requested_action="$(value_after --action "$@")"
@@ -55,6 +68,7 @@ case "${1:-} ${2:-} ${3:-}" in
     printf '{}\n'
     ;;
   "db autonomous-database get")
+    emit_warning
     cat "$state_dir/adb"
     ;;
   "db autonomous-database start")
@@ -69,12 +83,24 @@ case "${1:-} ${2:-} ${3:-}" in
     printf 'ocid1.bastionsession.oc1.eu-frankfurt-1.testnewsession\n'
     ;;
   "bastion session list")
+    emit_warning
     if value_after --display-name "$@" >/dev/null 2>&1; then
       printf 'ocid1.bastionsession.oc1.eu-frankfurt-1.testnewsession\n'
     else
       printf '%s\n' \
         'ocid1.bastionsession.oc1.eu-frankfurt-1.testoldsession1' \
         'ocid1.bastionsession.oc1.eu-frankfurt-1.testoldsession2'
+    fi
+    ;;
+  "instance-agent plugin list")
+    emit_warning
+    calls="$(<"$state_dir/plugin-calls")"
+    calls=$((calls + 1))
+    printf '%s\n' "$calls" > "$state_dir/plugin-calls"
+    if (( calls < 3 )); then
+      printf 'STOPPED\n'
+    else
+      printf 'RUNNING\n'
     fi
     ;;
   "bastion session get")
@@ -99,6 +125,7 @@ chmod +x "$mock_oci"
 
 export OCI_CLI_BIN="$mock_oci"
 export MOCK_STATE_DIR="$mock_state_dir"
+export MOCK_OCI_WARN=true
 
 common_args=(
   --instance-id ocid1.instance.oc1.eu-frankfurt-1.testcompute
@@ -124,16 +151,22 @@ grep -q 'PLANNED' "$dry_run_report"
 grep -q 'Would create a managed SSH session' "$dry_run_report"
 
 sleep 1
-"$script" \
+start_output="$("$script" \
   "${common_args[@]}" \
   --private-ip 10.0.1.10 \
   --ssh-public-key "$public_key" \
-  --ssh-private-key "$private_key"
+  --ssh-private-key "$private_key" \
+  --bastion-plugin-wait-seconds 15)"
 
 [[ "$(<"$mock_state_dir/compute")" == "RUNNING" ]]
 [[ "$(<"$mock_state_dir/adb")" == "AVAILABLE" ]]
+[[ "$(<"$mock_state_dir/plugin-calls")" == "3" ]]
+grep -Fq 'Bastion plugin check 1: status=STOPPED; expected=RUNNING' <<< "$start_output"
+grep -Fq 'Bastion plugin check 3: status=RUNNING; expected=RUNNING' <<< "$start_output"
+grep -Fq 'Bastion plugin is RUNNING after 3 iteration(s).' <<< "$start_output"
 start_report="$(find "$mock_report_dir" -name 'stack-lifecycle-*.csv' -print | sort | sed -n '2p')"
 grep -q 'bastion_session' "$start_report"
+grep -q 'oracle_cloud_agent_plugin' "$start_report"
 grep -q 'testnewsession' "$start_report"
 grep -q 'SUCCEEDED' "$start_report"
 

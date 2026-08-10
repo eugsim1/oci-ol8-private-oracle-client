@@ -123,6 +123,8 @@ grep -Fqx "$private_key" "$lifecycle_log"
 grep -Fqx -- '--ssh-public-key' "$lifecycle_log"
 grep -Fqx "$public_key" "$lifecycle_log"
 grep -Fqx 'TESTPROFILE' "$lifecycle_log"
+grep -Fqx -- '--bastion-plugin-wait-seconds' "$lifecycle_log"
+grep -Fqx '600' "$lifecycle_log"
 if grep -Fqx -- '--dry-run' "$lifecycle_log"; then
   echo 'start-and-connect unexpectedly forwarded --dry-run.' >&2
   exit 1
@@ -206,7 +208,42 @@ LIFECYCLE_SCRIPT_BIN="$lifecycle_script" \
 grep -Fqx "$explicit_private_key" "$lifecycle_log"
 grep -Fqx "$explicit_public_key" "$lifecycle_log"
 
+# The stop wrapper selects the compartment workspace and forwards only
+# lifecycle shutdown options; it must never request start or connect.
+: > "$lifecycle_log"
+: > "$workspace_log"
+TERRAFORM_BIN="$mock_terraform" \
+WORKSPACE_SELECTOR_BIN="$workspace_selector" \
+LIFECYCLE_SCRIPT_BIN="$lifecycle_script" \
+"$project_dir/scripts/stop-all.sh" \
+  --tfvars "$tfvars_file" \
+  --profile TESTPROFILE \
+  --wait-seconds 30 \
+  --poll-seconds 2 \
+  --report-dir "$test_dir/reports" \
+  --dry-run
+
+grep -Fqx "$tfvars_file" "$workspace_log"
+grep -Fqx -- '--stop-all' "$lifecycle_log"
+grep -Fqx -- '--dry-run' "$lifecycle_log"
+grep -Fqx 'TESTPROFILE' "$lifecycle_log"
+if grep -Eqx -- '--start|--connect|--force-stop' "$lifecycle_log"; then
+  echo 'stop-all forwarded an unexpected lifecycle option.' >&2
+  exit 1
+fi
+
+: > "$lifecycle_log"
+TERRAFORM_BIN="$mock_terraform" \
+WORKSPACE_SELECTOR_BIN="$workspace_selector" \
+LIFECYCLE_SCRIPT_BIN="$lifecycle_script" \
+"$project_dir/scripts/stop-all.sh" \
+  --tfvars "$tfvars_file" \
+  --force-stop
+grep -Fqx -- '--stop-all' "$lifecycle_log"
+grep -Fqx -- '--force-stop' "$lifecycle_log"
+
 "$project_dir/scripts/renew-bastion-session.sh" --help >/dev/null
 "$project_dir/scripts/start-and-connect.sh" --help >/dev/null
+"$project_dir/scripts/stop-all.sh" --help >/dev/null
 
-echo 'PASS: session-only renewal and artifact-driven start/connect wrapper'
+echo 'PASS: session renewal and artifact-driven start/connect/stop wrappers'
