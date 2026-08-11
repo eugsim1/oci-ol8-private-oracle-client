@@ -16,6 +16,7 @@ external Linux controller with the repository checkout and Terraform state.
 | Connect through the current active session | `connect-oracle-server.sh` | No | No | No | Yes |
 | Configure or reconfigure Linux | `run-ansible.sh` | No | No | Yes | No |
 | Open the private VNC tunnel | `open-vnc-tunnel.sh` | No | No | No | SSH tunnel |
+| Generate local Streamlit assets | `generate-output-assets.ps1` | No | No | No | No |
 | Open Streamlit from Windows using Terraform and OCI config | `connect-streamlit-from-terraform.ps1` | No | Creates connector session | No | SSH tunnel |
 | Select the compartment-safe state | `select-compartment-workspace.sh` | No | No | No | No |
 
@@ -252,20 +253,18 @@ To regenerate the inventory from the currently selected Terraform state and
 the `STREAMLIT_API_KEY` profile in `$HOME\.oci\config`, run:
 
 ```powershell
-.\scripts\connect-streamlit-from-terraform.ps1 `
-  -RefreshAssets `
-  -AssetsOnly `
+.\scripts\generate-output-assets.ps1 `
   -ProfileName 'STREAMLIT_API_KEY' `
   -SshPrivateKeyPath "$HOME\.ssh\bastion_ed25519" `
   -SshPublicKeyPath "$HOME\.ssh\bastion_ed25519.pub" `
   -ConnectorScriptPath 'C:\path\to\focus-loader-report-upload-source\windows-api-key-auth-streamlit\connect-streamlit-api-key-auth.ps1'
 ```
 
-`-SshPublicKeyPath` is optional when the connector can use the public key
-adjacent to the private key. Remove `-AssetsOnly` to regenerate the file and
-connect immediately. Use `-AssetsFilePath` for a different inventory,
-`-TerraformDirectory` for a different checkout, and `-OciConfigFilePath`
-for a non-default OCI configuration.
+The generator only writes the inventory; it never creates a Bastion session
+or starts SSH. `-SshPublicKeyPath` is optional when the connector can use the
+public key adjacent to the private key. Use `-AssetsFilePath` for a different
+inventory, `-TerraformDirectory` for a different checkout, and
+`-OciConfigFilePath` for a non-default OCI configuration.
 
 Before refreshing, verify that Terraform is using the deployed workspace:
 

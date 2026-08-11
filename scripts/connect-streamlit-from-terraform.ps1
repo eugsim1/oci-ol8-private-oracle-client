@@ -239,7 +239,7 @@ function Write-AssetsFile {
     }
     $lines = New-Object 'System.Collections.Generic.List[string]'
     $lines.Add('# Local Streamlit/OCI asset inventory. Do not commit this file.')
-    $lines.Add('# Regenerate with connect-streamlit-from-terraform.ps1 -RefreshAssets -AssetsOnly ...')
+    $lines.Add('# Regenerate with generate-output-assets.ps1.')
     foreach ($key in $Values.Keys) { $lines.Add("${key}=$($Values[$key])") }
     $utf8WithoutBom = New-Object System.Text.UTF8Encoding($false)
     [System.IO.File]::WriteAllLines($fullPath, $lines, $utf8WithoutBom)

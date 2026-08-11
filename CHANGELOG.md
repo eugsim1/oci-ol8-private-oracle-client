@@ -2,6 +2,15 @@
 
 All notable operational changes to this project are documented here.
 
+## 1.7.0 - 2026-08-11
+
+- Added the standalone `scripts/generate-output-assets.ps1` command.
+- The generator reads Terraform outputs and the selected OCI API-key profile,
+  validates all paths and identifiers, and writes `scripts/output_assets.txt`
+  without creating a Bastion session or opening SSH.
+- Updated the offline PowerShell integration test to generate the inventory
+  through the standalone command before testing connection-from-file.
+
 ## 1.6.0 - 2026-08-11
 
 - Added a validated `scripts/output_assets.txt` runtime inventory for the

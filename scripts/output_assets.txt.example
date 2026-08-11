@@ -1,4 +1,4 @@
-# Copy to output_assets.txt or generate it with -RefreshAssets -AssetsOnly.
+# Copy to output_assets.txt or generate it with generate-output-assets.ps1.
 # Never put passwords or private-key contents in this file.
 AssetsVersion=1
 BastionId=ocid1.bastion.oc1.eu-frankfurt-1.REPLACE

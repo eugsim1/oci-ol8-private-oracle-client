@@ -3,6 +3,7 @@ Set-StrictMode -Version Latest
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $scriptUnderTest = Join-Path $projectRoot 'scripts\connect-streamlit-from-terraform.ps1'
+$generatorUnderTest = Join-Path $projectRoot 'scripts\generate-output-assets.ps1'
 $testRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("focus-streamlit-test-{0}" -f [guid]::NewGuid().ToString('N'))
 
 try {
@@ -63,10 +64,8 @@ param(
 
     $assetsPath = Join-Path $testRoot 'output_assets.txt'
     $env:CONNECTOR_CAPTURE_PATH = $capturePath
-    & $scriptUnderTest `
+    & $generatorUnderTest `
         -AssetsFilePath $assetsPath `
-        -RefreshAssets `
-        -AssetsOnly `
         -TerraformDirectory $terraformDirectory `
         -TerraformExecutable $terraformMock `
         -OciConfigFilePath $configPath `
@@ -76,7 +75,7 @@ param(
         -ConnectorScriptPath $connectorMock
 
     if (-not (Test-Path -LiteralPath $assetsPath -PathType Leaf)) { throw 'Asset inventory was not created.' }
-    if (Test-Path -LiteralPath $capturePath) { throw 'AssetsOnly unexpectedly invoked the connector.' }
+    if (Test-Path -LiteralPath $capturePath) { throw 'Generator unexpectedly invoked the connector.' }
     $assetText = Get-Content -Raw -LiteralPath $assetsPath
     foreach ($expected in @('AssetsVersion=1', 'BastionId=ocid1.bastion.', 'InstanceId=ocid1.instance.',
             'PrivateIp=10.30.1.159', 'ProfileName=STREAMLIT_API_KEY', "SshPrivateKeyPath=$sshKey")) {
