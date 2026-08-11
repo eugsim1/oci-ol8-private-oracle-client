@@ -2,6 +2,17 @@
 
 All notable operational changes to this project are documented here.
 
+## 1.5.0 - 2026-08-11
+
+- Added `scripts/connect-streamlit-from-terraform.ps1` for Windows clients.
+- Resolve Bastion OCID, Compute OCID, private IP, and region from the current
+  Terraform state instead of requiring manually copied values.
+- Resolve the OCI user, tenancy, fingerprint, and API signing-key path from a
+  selected profile in `$HOME\.oci\config`.
+- Added strict identifier, IP address, profile, and key-file validation plus a
+  dry-run workflow.
+- Added an offline PowerShell integration test and Windows CI coverage.
+
 ## 1.4.1 - 2026-08-10
 
 - Added a readiness gate that waits for the Compute instance's `Bastion`

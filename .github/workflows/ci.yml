@@ -22,3 +22,13 @@ jobs:
 
       - name: Test Bastion session wrappers
         run: ./tests/test-bastion-session-scripts.sh
+
+  powershell-tests:
+    runs-on: windows-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Test Terraform-to-Streamlit connector
+        shell: powershell
+        run: .\tests\test-connect-streamlit-from-terraform.ps1

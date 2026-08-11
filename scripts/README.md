@@ -16,6 +16,7 @@ external Linux controller with the repository checkout and Terraform state.
 | Connect through the current active session | `connect-oracle-server.sh` | No | No | No | Yes |
 | Configure or reconfigure Linux | `run-ansible.sh` | No | No | Yes | No |
 | Open the private VNC tunnel | `open-vnc-tunnel.sh` | No | No | No | SSH tunnel |
+| Open Streamlit from Windows using Terraform and OCI config | `connect-streamlit-from-terraform.ps1` | No | Creates connector session | No | SSH tunnel |
 | Select the compartment-safe state | `select-compartment-workspace.sh` | No | No | No | No |
 
 ## Created artifacts used by the scripts
@@ -227,6 +228,59 @@ workspace name. It refuses an unsafe workspace switch when the current
 workspace already contains resources unless the documented explicit override
 is supplied.
 
+## 10. Open Streamlit from Windows using current Terraform assets
+
+Run `connect-streamlit-from-terraform.ps1` on the Windows laptop that contains
+the Terraform checkout, OCI CLI configuration, SSH key, and the existing
+`connect-streamlit-api-key-auth.ps1` connector. The launcher reads these
+Terraform outputs from the currently selected state:
+
+- `bastion_id`
+- `instance_id`
+- `private_ip`
+- `region`
+
+It reads `user`, `tenancy`, `fingerprint`, and `key_file` from the selected
+profile in `$HOME\.oci\config`. It does not store or print private-key contents.
+The `key_file` setting may be absolute, relative to the OCI config directory,
+or start with `~`, `$HOME`, `${HOME}`, or a Windows `%VARIABLE%`.
+
+First verify the selected Terraform workspace:
+
+```powershell
+terraform -chdir=.\terraform workspace show
+terraform -chdir=.\terraform output bastion_id
+```
+
+Then perform a dry run:
+
+```powershell
+.\scripts\connect-streamlit-from-terraform.ps1 `
+  -ConnectorScriptPath 'C:\path\to\focus-loader-report-upload-source\windows-api-key-auth-streamlit\connect-streamlit-api-key-auth.ps1' `
+  -ProfileName 'STREAMLIT_API_KEY' `
+  -DryRun
+```
+
+Open the tunnel by removing `-DryRun`:
+
+```powershell
+.\scripts\connect-streamlit-from-terraform.ps1 `
+  -ConnectorScriptPath 'C:\path\to\focus-loader-report-upload-source\windows-api-key-auth-streamlit\connect-streamlit-api-key-auth.ps1' `
+  -ProfileName 'STREAMLIT_API_KEY'
+```
+
+To avoid supplying the connector path on future runs, set it once in the
+current PowerShell session:
+
+```powershell
+$env:FOCUS_STREAMLIT_API_KEY_CONNECTOR = 'C:\path\to\focus-loader-report-upload-source\windows-api-key-auth-streamlit\connect-streamlit-api-key-auth.ps1'
+.\scripts\connect-streamlit-from-terraform.ps1 -ProfileName 'STREAMLIT_API_KEY'
+```
+
+The SSH key defaults to `$HOME\.ssh\bastion_ed25519`. Override it with
+`-SshPrivateKeyPath`. Use `-TerraformDirectory` for a different checkout and
+`-OciConfigFilePath` for a non-default OCI configuration file.
+
 ## Testing
 
 Offline tests use test OCIDs and mock executables; they do not contact OCI:
@@ -234,6 +288,7 @@ Offline tests use test OCIDs and mock executables; they do not contact OCI:
 ```bash
 ./tests/test-manage-existing-stack.sh
 ./tests/test-bastion-session-scripts.sh
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tests\test-connect-streamlit-from-terraform.ps1
 ```
 
 For static validation when ShellCheck is installed:
