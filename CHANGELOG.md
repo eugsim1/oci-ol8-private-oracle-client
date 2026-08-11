@@ -2,6 +2,15 @@
 
 All notable operational changes to this project are documented here.
 
+## 1.8.0 - 2026-08-11
+
+- Added `scripts/generate-output-assets.sh` for Oracle Linux 8 and other Bash
+  controllers.
+- Read individual Terraform outputs without requiring `jq`, parse the selected
+  OCI API-key profile, validate identifiers and local files, and atomically
+  write `output_assets.txt` with mode `0600`.
+- Added an offline Linux integration test and CI coverage for the generator.
+
 ## 1.7.0 - 2026-08-11
 
 - Added the standalone `scripts/generate-output-assets.ps1` command.

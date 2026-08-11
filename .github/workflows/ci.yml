@@ -23,6 +23,9 @@ jobs:
       - name: Test Bastion session wrappers
         run: ./tests/test-bastion-session-scripts.sh
 
+      - name: Test Linux Streamlit asset generator
+        run: ./tests/test-generate-output-assets.sh
+
   powershell-tests:
     runs-on: windows-latest
     steps:

@@ -16,7 +16,8 @@ external Linux controller with the repository checkout and Terraform state.
 | Connect through the current active session | `connect-oracle-server.sh` | No | No | No | Yes |
 | Configure or reconfigure Linux | `run-ansible.sh` | No | No | Yes | No |
 | Open the private VNC tunnel | `open-vnc-tunnel.sh` | No | No | No | SSH tunnel |
-| Generate local Streamlit assets | `generate-output-assets.ps1` | No | No | No | No |
+| Generate Streamlit assets on Windows | `generate-output-assets.ps1` | No | No | No | No |
+| Generate Streamlit assets on Linux | `generate-output-assets.sh` | No | No | No | No |
 | Open Streamlit from Windows using Terraform and OCI config | `connect-streamlit-from-terraform.ps1` | No | Creates connector session | No | SSH tunnel |
 | Select the compartment-safe state | `select-compartment-workspace.sh` | No | No | No | No |
 
@@ -273,6 +274,30 @@ terraform -chdir=.\terraform workspace show
 terraform -chdir=.\terraform output bastion_id
 ```
 
+### Linux / Oracle Linux 8 generator
+
+Run the native Bash generator from the Linux controller that holds the active
+Terraform state and OCI configuration:
+
+```bash
+chmod 0700 scripts/generate-output-assets.sh
+./scripts/generate-output-assets.sh \
+  --profile STREAMLIT_API_KEY \
+  --ssh-private-key "$HOME/.ssh/bastion_ed25519" \
+  --ssh-public-key "$HOME/.ssh/bastion_ed25519.pub" \
+  --connector-script "/path/to/connect-streamlit-api-key-auth.ps1"
+```
+
+It reads `bastion_id`, `instance_id`, `private_ip`, and `region` from the
+currently selected Terraform workspace. It reads `user`, `tenancy`,
+`fingerprint`, and `key_file` from `$HOME/.oci/config`, requires no `jq`, and
+writes `scripts/output_assets.txt` atomically with permissions `0600`.
+
+Paths stored in the inventory are paths on the machine running the generator.
+If the file is copied from Linux to a Windows laptop, replace the SSH key, API
+key, OCI config, and connector paths with their Windows equivalents before
+running the PowerShell connector.
+
 ## Testing
 
 Offline tests use test OCIDs and mock executables; they do not contact OCI:
@@ -280,6 +305,7 @@ Offline tests use test OCIDs and mock executables; they do not contact OCI:
 ```bash
 ./tests/test-manage-existing-stack.sh
 ./tests/test-bastion-session-scripts.sh
+./tests/test-generate-output-assets.sh
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tests\test-connect-streamlit-from-terraform.ps1
 ```
 
