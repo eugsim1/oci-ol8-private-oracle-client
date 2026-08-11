@@ -2,6 +2,14 @@
 
 All notable operational changes to this project are documented here.
 
+## 1.8.1 - 2026-08-11
+
+- Documented that `output_assets.txt` is input to
+  `connect-streamlit-from-terraform.ps1`, not directly to the lower-level
+  `connect-streamlit-api-key-auth.ps1` connector.
+- Added explicit Windows and Linux/PowerShell 7 execution commands, the
+  connector flow, required path entries, and cross-platform path guidance.
+
 ## 1.8.0 - 2026-08-11
 
 - Added `scripts/generate-output-assets.sh` for Oracle Linux 8 and other Bash

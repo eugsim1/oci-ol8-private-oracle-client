@@ -250,6 +250,54 @@ by Git. The repository contains `output_assets.txt.example` only. The
 inventory contains paths and identifiers, never passwords or private-key
 contents.
 
+### How `output_assets.txt` is consumed
+
+Do **not** pass `output_assets.txt` directly to
+`connect-streamlit-api-key-auth.ps1`. That lower-level connector accepts
+individual parameters and has no asset-file parameter. Always give the file to
+the project wrapper, which validates the inventory and converts its entries
+into connector parameters:
+
+```text
+output_assets.txt
+        -> connect-streamlit-from-terraform.ps1
+        -> connect-streamlit-api-key-auth.ps1
+        -> OCI Bastion session and SSH port-forward
+```
+
+Use an explicit inventory path on Windows:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass `
+  -File ".\scripts\connect-streamlit-from-terraform.ps1" `
+  -AssetsFilePath ".\scripts\output_assets.txt"
+```
+
+Use the same wrapper on Linux when PowerShell 7 (`pwsh`) and the referenced
+PowerShell connector are installed:
+
+```bash
+pwsh -NoProfile \
+  -File ./scripts/connect-streamlit-from-terraform.ps1 \
+  -AssetsFilePath ./scripts/output_assets.txt
+```
+
+The inventory entry below must name the actual lower-level connector file; it
+must not point back to `output_assets.txt`:
+
+```text
+ConnectorScriptPath=/path/to/connect-streamlit-api-key-auth.ps1
+```
+
+Before execution, the wrapper requires every referenced file to exist. In
+particular, verify these path entries:
+
+- `SshPrivateKeyPath`
+- `SshPublicKeyPath`, when present
+- `ApiPrivateKeyPath`
+- `OciConfigFilePath`
+- `ConnectorScriptPath`
+
 To regenerate the inventory from the currently selected Terraform state and
 the `STREAMLIT_API_KEY` profile in `$HOME\.oci\config`, run:
 
@@ -296,7 +344,8 @@ writes `scripts/output_assets.txt` atomically with permissions `0600`.
 Paths stored in the inventory are paths on the machine running the generator.
 If the file is copied from Linux to a Windows laptop, replace the SSH key, API
 key, OCI config, and connector paths with their Windows equivalents before
-running the PowerShell connector.
+running the PowerShell wrapper. The OCI identifiers, region, IP address,
+profile name, ports, and timeout values remain portable.
 
 ## Testing
 
@@ -320,6 +369,8 @@ shellcheck scripts/*.sh tests/*.sh
 | Symptom | Resolution |
 |---|---|
 | Terraform output is empty | Confirm the selected tfvars/workspace and state backend. |
+| `output_assets.txt` is rejected by `connect-streamlit-api-key-auth.ps1` | Pass the file to `connect-streamlit-from-terraform.ps1 -AssetsFilePath`, not directly to the lower-level connector. |
+| A path from a copied Linux inventory is missing on Windows | Replace the SSH key, API key, OCI config, and connector paths with their Windows equivalents. |
 | Private key cannot be resolved | Pass `--ssh-private-key`; confirm the matching `.pub` file exists. |
 | Compute remains `STOPPED` | Check OCI CLI identity, instance state, and `manage instance-family` permission. |
 | Bastion plugin never reaches `RUNNING` | Check Oracle Cloud Agent and its Bastion plugin on the Compute node; increase `--bastion-plugin-wait-seconds` if startup legitimately needs longer. |
