@@ -228,61 +228,51 @@ workspace name. It refuses an unsafe workspace switch when the current
 workspace already contains resources unless the documented explicit override
 is supplied.
 
-## 10. Open Streamlit from Windows using current Terraform assets
+## 10. Open Streamlit from Windows using the asset inventory
 
-Run `connect-streamlit-from-terraform.ps1` on the Windows laptop that contains
-the Terraform checkout, OCI CLI configuration, SSH key, and the existing
-`connect-streamlit-api-key-auth.ps1` connector. The launcher reads these
-Terraform outputs from the currently selected state:
+The launcher normally reads `scripts\output_assets.txt`; therefore the
+connection command no longer needs OCIDs, profile values, or key paths:
 
-- `bastion_id`
-- `instance_id`
-- `private_ip`
-- `region`
+```powershell
+.\scripts\connect-streamlit-from-terraform.ps1
+```
 
-It reads `user`, `tenancy`, `fingerprint`, and `key_file` from the selected
-profile in `$HOME\.oci\config`. It does not store or print private-key contents.
-The `key_file` setting may be absolute, relative to the OCI config directory,
-or start with `~`, `$HOME`, `${HOME}`, or a Windows `%VARIABLE%`.
+Verify the complete flow without creating a Bastion session:
 
-First verify the selected Terraform workspace:
+```powershell
+.\scripts\connect-streamlit-from-terraform.ps1 -DryRun
+```
+
+The real `output_assets.txt` is local infrastructure metadata and is ignored
+by Git. The repository contains `output_assets.txt.example` only. The
+inventory contains paths and identifiers, never passwords or private-key
+contents.
+
+To regenerate the inventory from the currently selected Terraform state and
+the `STREAMLIT_API_KEY` profile in `$HOME\.oci\config`, run:
+
+```powershell
+.\scripts\connect-streamlit-from-terraform.ps1 `
+  -RefreshAssets `
+  -AssetsOnly `
+  -ProfileName 'STREAMLIT_API_KEY' `
+  -SshPrivateKeyPath "$HOME\.ssh\bastion_ed25519" `
+  -SshPublicKeyPath "$HOME\.ssh\bastion_ed25519.pub" `
+  -ConnectorScriptPath 'C:\path\to\focus-loader-report-upload-source\windows-api-key-auth-streamlit\connect-streamlit-api-key-auth.ps1'
+```
+
+`-SshPublicKeyPath` is optional when the connector can use the public key
+adjacent to the private key. Remove `-AssetsOnly` to regenerate the file and
+connect immediately. Use `-AssetsFilePath` for a different inventory,
+`-TerraformDirectory` for a different checkout, and `-OciConfigFilePath`
+for a non-default OCI configuration.
+
+Before refreshing, verify that Terraform is using the deployed workspace:
 
 ```powershell
 terraform -chdir=.\terraform workspace show
 terraform -chdir=.\terraform output bastion_id
 ```
-
-Then perform a dry run:
-
-```powershell
-.\scripts\connect-streamlit-from-terraform.ps1 `
-  -ConnectorScriptPath 'C:\path\to\focus-loader-report-upload-source\windows-api-key-auth-streamlit\connect-streamlit-api-key-auth.ps1' `
-  -ProfileName 'STREAMLIT_API_KEY' `
-  -SshPrivateKeyPath "$HOME\.ssh\bastion_ed25519" `
-  -DryRun
-```
-
-Open the tunnel by removing `-DryRun`:
-
-```powershell
-.\scripts\connect-streamlit-from-terraform.ps1 `
-  -ConnectorScriptPath 'C:\path\to\focus-loader-report-upload-source\windows-api-key-auth-streamlit\connect-streamlit-api-key-auth.ps1' `
-  -ProfileName 'STREAMLIT_API_KEY' `
-  -SshPrivateKeyPath "$HOME\.ssh\bastion_ed25519"
-```
-
-To avoid supplying the connector path on future runs, set it once in the
-current PowerShell session:
-
-```powershell
-$env:FOCUS_STREAMLIT_API_KEY_CONNECTOR = 'C:\path\to\focus-loader-report-upload-source\windows-api-key-auth-streamlit\connect-streamlit-api-key-auth.ps1'
-.\scripts\connect-streamlit-from-terraform.ps1 -ProfileName 'STREAMLIT_API_KEY' -SshPrivateKeyPath "$HOME\.ssh\bastion_ed25519"
-```
-
-`-SshPrivateKeyPath` is mandatory. If the matching public key is not adjacent
-to it as `<private-key>.pub`, also provide `-SshPublicKeyPath`. Use
-`-TerraformDirectory` for a different checkout and `-OciConfigFilePath` for a
-non-default OCI configuration file.
 
 ## Testing
 

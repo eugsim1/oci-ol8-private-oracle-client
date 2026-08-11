@@ -2,6 +2,16 @@
 
 All notable operational changes to this project are documented here.
 
+## 1.6.0 - 2026-08-11
+
+- Added a validated `scripts/output_assets.txt` runtime inventory for the
+  Streamlit Bastion connection parameters.
+- Added `-RefreshAssets -AssetsOnly` to regenerate the inventory from the
+  selected Terraform state and OCI API-key profile without opening a session.
+- Changed the normal launcher flow to read the local inventory and connect
+  without repeating OCIDs, profile values, or key paths on the command line.
+- Added a safe committed example and ignored the real local asset inventory.
+
 ## 1.5.1 - 2026-08-11
 
 - Made `-SshPrivateKeyPath` an explicit mandatory launcher parameter.

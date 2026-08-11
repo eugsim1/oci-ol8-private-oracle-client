@@ -1,0 +1,25 @@
+# Copy to output_assets.txt or generate it with -RefreshAssets -AssetsOnly.
+# Never put passwords or private-key contents in this file.
+AssetsVersion=1
+BastionId=ocid1.bastion.oc1.eu-frankfurt-1.REPLACE
+InstanceId=ocid1.instance.oc1.eu-frankfurt-1.REPLACE
+PrivateIp=10.30.1.10
+Region=eu-frankfurt-1
+SshPrivateKeyPath=$HOME\.ssh\bastion_ed25519
+SshPublicKeyPath=$HOME\.ssh\bastion_ed25519.pub
+OciUserId=ocid1.user.oc1..REPLACE
+OciTenancyId=ocid1.tenancy.oc1..REPLACE
+ApiKeyFingerprint=aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99
+ApiPrivateKeyPath=$HOME\.oci\oci_api_key.pem
+ProfileName=STREAMLIT_API_KEY
+OciConfigFilePath=$HOME\.oci\config
+ConnectorScriptPath=C:\path\to\focus-loader-report-upload-source\windows-api-key-auth-streamlit\connect-streamlit-api-key-auth.ps1
+BastionSessionTtl=3600
+LocalPort=8501
+RemotePort=8501
+WaitSeconds=1200
+PollSeconds=10
+TargetUser=oracle
+OciExecutable=oci
+SshExecutable=ssh
+KeepSession=false

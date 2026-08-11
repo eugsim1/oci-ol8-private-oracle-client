@@ -38,6 +38,7 @@
 ansible/group_vars/all.yml
 ansible/inventory/hosts.yml
 ansible/secrets/
+scripts/output_assets.txt
 
 # Reports can contain infrastructure identifiers and connection metadata
 reports/*.csv
