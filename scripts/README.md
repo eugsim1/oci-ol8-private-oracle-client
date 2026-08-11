@@ -258,6 +258,7 @@ Then perform a dry run:
 .\scripts\connect-streamlit-from-terraform.ps1 `
   -ConnectorScriptPath 'C:\path\to\focus-loader-report-upload-source\windows-api-key-auth-streamlit\connect-streamlit-api-key-auth.ps1' `
   -ProfileName 'STREAMLIT_API_KEY' `
+  -SshPrivateKeyPath "$HOME\.ssh\bastion_ed25519" `
   -DryRun
 ```
 
@@ -266,7 +267,8 @@ Open the tunnel by removing `-DryRun`:
 ```powershell
 .\scripts\connect-streamlit-from-terraform.ps1 `
   -ConnectorScriptPath 'C:\path\to\focus-loader-report-upload-source\windows-api-key-auth-streamlit\connect-streamlit-api-key-auth.ps1' `
-  -ProfileName 'STREAMLIT_API_KEY'
+  -ProfileName 'STREAMLIT_API_KEY' `
+  -SshPrivateKeyPath "$HOME\.ssh\bastion_ed25519"
 ```
 
 To avoid supplying the connector path on future runs, set it once in the
@@ -274,12 +276,13 @@ current PowerShell session:
 
 ```powershell
 $env:FOCUS_STREAMLIT_API_KEY_CONNECTOR = 'C:\path\to\focus-loader-report-upload-source\windows-api-key-auth-streamlit\connect-streamlit-api-key-auth.ps1'
-.\scripts\connect-streamlit-from-terraform.ps1 -ProfileName 'STREAMLIT_API_KEY'
+.\scripts\connect-streamlit-from-terraform.ps1 -ProfileName 'STREAMLIT_API_KEY' -SshPrivateKeyPath "$HOME\.ssh\bastion_ed25519"
 ```
 
-The SSH key defaults to `$HOME\.ssh\bastion_ed25519`. Override it with
-`-SshPrivateKeyPath`. Use `-TerraformDirectory` for a different checkout and
-`-OciConfigFilePath` for a non-default OCI configuration file.
+`-SshPrivateKeyPath` is mandatory. If the matching public key is not adjacent
+to it as `<private-key>.pub`, also provide `-SshPublicKeyPath`. Use
+`-TerraformDirectory` for a different checkout and `-OciConfigFilePath` for a
+non-default OCI configuration file.
 
 ## Testing
 

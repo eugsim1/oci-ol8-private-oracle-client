@@ -2,6 +2,12 @@
 
 All notable operational changes to this project are documented here.
 
+## 1.5.1 - 2026-08-11
+
+- Made `-SshPrivateKeyPath` an explicit mandatory launcher parameter.
+- Documented the optional `-SshPublicKeyPath` parameter for key pairs whose
+  public key is not stored beside the private key.
+
 ## 1.5.0 - 2026-08-11
 
 - Added `scripts/connect-streamlit-from-terraform.ps1` for Windows clients.

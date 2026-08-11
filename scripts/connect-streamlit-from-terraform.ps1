@@ -12,11 +12,12 @@ No OCIDs, fingerprints, or API private-key paths are stored in this script.
 
 .EXAMPLE
 .\scripts\connect-streamlit-from-terraform.ps1 `
-  -ConnectorScriptPath 'C:\focus-loader-report-upload-source\windows-api-key-auth-streamlit\connect-streamlit-api-key-auth.ps1'
+  -ConnectorScriptPath 'C:\focus-loader-report-upload-source\windows-api-key-auth-streamlit\connect-streamlit-api-key-auth.ps1' `
+  -SshPrivateKeyPath "$HOME\.ssh\bastion_ed25519"
 
 .EXAMPLE
 $env:FOCUS_STREAMLIT_API_KEY_CONNECTOR = 'C:\focus-loader-report-upload-source\windows-api-key-auth-streamlit\connect-streamlit-api-key-auth.ps1'
-.\scripts\connect-streamlit-from-terraform.ps1 -ProfileName STREAMLIT_API_KEY -DryRun
+.\scripts\connect-streamlit-from-terraform.ps1 -ProfileName STREAMLIT_API_KEY -SshPrivateKeyPath "$HOME\.ssh\bastion_ed25519" -DryRun
 #>
 
 [CmdletBinding()]
@@ -28,7 +29,8 @@ param(
 
     [string]$OciConfigFilePath = (Join-Path $HOME '.oci\config'),
 
-    [string]$SshPrivateKeyPath = (Join-Path $HOME '.ssh\bastion_ed25519'),
+    [Parameter(Mandatory = $true)]
+    [string]$SshPrivateKeyPath,
 
     [string]$SshPublicKeyPath,
 

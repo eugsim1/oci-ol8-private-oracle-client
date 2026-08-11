@@ -5,6 +5,12 @@ $projectRoot = Split-Path -Parent $PSScriptRoot
 $scriptUnderTest = Join-Path $projectRoot 'scripts\connect-streamlit-from-terraform.ps1'
 $testRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("focus-streamlit-test-{0}" -f [guid]::NewGuid().ToString('N'))
 
+$sshParameter = (Get-Command -Name $scriptUnderTest).Parameters['SshPrivateKeyPath']
+$mandatoryAttribute = $sshParameter.Attributes | Where-Object {
+    $_ -is [System.Management.Automation.ParameterAttribute] -and $_.Mandatory
+}
+if (-not $mandatoryAttribute) { throw 'SshPrivateKeyPath must be an explicit mandatory parameter.' }
+
 try {
     $terraformDirectory = Join-Path $testRoot 'terraform'
     $ociDirectory = Join-Path $testRoot '.oci'
