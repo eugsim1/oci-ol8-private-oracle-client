@@ -178,9 +178,25 @@ sleep 1
 grep -Fqx 'ocid1.bastionsession.oc1.eu-frankfurt-1.testoldsession1' "$mock_state_dir/deleted-sessions"
 grep -Fqx 'ocid1.bastionsession.oc1.eu-frankfurt-1.testoldsession2' "$mock_state_dir/deleted-sessions"
 
+# The modular phases must start resources without polling the plugin, and then
+# create a session without repeating either resource-start or plugin logic.
+plugin_calls_before="$(<"$mock_state_dir/plugin-calls")"
+"$script" --start-resources-only "${common_args[@]}" >/dev/null
+[[ "$(<"$mock_state_dir/compute")" == "RUNNING" ]]
+[[ "$(<"$mock_state_dir/adb")" == "AVAILABLE" ]]
+[[ "$(<"$mock_state_dir/plugin-calls")" == "$plugin_calls_before" ]]
+
+"$script" \
+  --create-session-only \
+  "${common_args[@]}" \
+  --private-ip 10.0.1.10 \
+  --ssh-public-key "$public_key" \
+  --ssh-private-key "$private_key" >/dev/null
+[[ "$(<"$mock_state_dir/plugin-calls")" == "$plugin_calls_before" ]]
+
 report_count="$(find "$mock_report_dir" -name 'stack-lifecycle-*.csv' -print | wc -l | tr -d ' ')"
-[[ "$report_count" == "3" ]]
-stop_report="$(find "$mock_report_dir" -name 'stack-lifecycle-*.csv' -print | sort | tail -n 1)"
+[[ "$report_count" == "5" ]]
+stop_report="$(grep -l '"stop-all"' "$mock_report_dir"/stack-lifecycle-*.csv | head -n 1)"
 grep -q 'SOFTSTOP accepted' "$stop_report"
 grep -q 'Autonomous Database stop accepted' "$stop_report"
 grep -q 'Lifecycle execution completed' "$stop_report"

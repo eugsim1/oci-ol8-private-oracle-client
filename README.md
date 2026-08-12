@@ -10,7 +10,7 @@ project, installs its Go and Oracle runtime dependencies, creates the target
 database schema, downloads the Autonomous Database wallet, and verifies the
 private database connection.
 
-**Current main-branch documentation version: `v1.4.0` (2026-08-08).**
+**Current main-branch documentation version: `v1.9.0` (2026-08-12).**
 
 The deployed utility reads OCI FOCUS cost-report objects from Object Storage,
 processes multiple gzip CSV files concurrently, enriches and normalizes the
@@ -206,12 +206,15 @@ final FOCUS schema/load workflow.
 │   ├── run-ansible.sh
 │   ├── renew-bastion-session.sh
 │   ├── start-and-connect.sh
+│   ├── wait-for-bastion-plugin.sh
+│   ├── stop-all.sh
 │   ├── manage-existing-stack.sh
 │   ├── connect-oracle-server.sh
 │   ├── open-vnc-tunnel.sh
 │   └── select-compartment-workspace.sh
 ├── tests/
 │   ├── test-manage-existing-stack.sh
+│   ├── test-wait-for-bastion-plugin.sh
 │   └── test-bastion-session-scripts.sh
 ├── docs/architecture/
 │   ├── oci-focus-private-finops.drawio
@@ -521,11 +524,12 @@ artifact-driven workflow instead:
 ./scripts/start-and-connect.sh --tfvars terraform.tfvars
 ```
 
-It selects the compartment workspace, resolves the existing key artifacts,
-starts only stopped resources, waits for Compute `RUNNING`, prints numbered
-polling iterations until the Compute instance's `Bastion` plugin is `RUNNING`,
-then waits for ADB `AVAILABLE`, creates a fresh Bastion session, writes a
-timestamped CSV, and opens SSH. It does not run Ansible. See
+It selects the compartment workspace, resolves the existing key artifacts, and
+runs three modular stages. First it starts only stopped resources and waits for
+Compute `RUNNING` plus ADB `AVAILABLE`. Next the standalone plugin waiter prints
+numbered polling iterations and retries transient OCI errors until the Compute
+instance's `Bastion` plugin is `RUNNING`. Finally it creates a fresh Bastion
+session, writes lifecycle CSVs, and opens SSH. It does not run Ansible. See
 [`scripts/README.md`](scripts/README.md) for the decision table and
 documentation for every script.
 
@@ -559,14 +563,15 @@ terraform -chdir=terraform output -raw region
 terraform -chdir=terraform output -raw bastion_session_public_key_path
 ```
 
-The start workflow sends both start requests, waits for Compute `RUNNING`, and
-then queries the OCI Compute Instance Agent once per polling interval. Each
-console iteration shows the current `Bastion` plugin state. Session creation
-cannot begin until that state is `RUNNING`. The workflow then waits for
-Autonomous Database `AVAILABLE`, creates a fresh OCI Bastion managed SSH session,
-and waits for `ACTIVE`. `AVAILABLE` is OCI's running/ready lifecycle state for
-Autonomous Database. The script prints a complete OpenSSH ProxyCommand and
-exits; add `--connect` only when an interactive login is wanted.
+The modular wrapper sends both start requests and waits for Compute `RUNNING`
+and Autonomous Database `AVAILABLE`. It then invokes
+`scripts/wait-for-bastion-plugin.sh`, which queries the OCI Compute Instance
+Agent once per polling interval. Each console iteration shows the current
+`Bastion` plugin state; not-yet-reported inventory and transient OCI/API errors
+are retried until the timeout. Session creation cannot begin until the plugin
+is `RUNNING`. The final stage creates a fresh managed SSH session and waits for
+`ACTIVE`. `AVAILABLE` is OCI's running/ready lifecycle state for Autonomous
+Database.
 
 Run it from an **external Linux controller**. The controller needs Bash, OCI CLI,
 Terraform when reading state outputs, and OpenSSH for `--connect`. Confirm the
@@ -649,6 +654,8 @@ shutdown can terminate the process before final validation and CSV completion.
 | Flag | Purpose |
 |---|---|
 | `--start` | Start resources and create a managed SSH session; this is the default. |
+| `--start-resources-only` | Start Compute/ADB and wait for their ready states without a plugin check or session. |
+| `--create-session-only` | Create the managed SSH session after external readiness checks. |
 | `--stop-all` | Delete all selected-Bastion sessions and stop ADB and Compute. |
 | `--force-stop` | Use Compute `STOP` instead of graceful `SOFTSTOP`. |
 | `--connect` | Open interactive SSH after the new session is active. |

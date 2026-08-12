@@ -36,10 +36,16 @@ closes every non-deleted session for the Bastion and stops both resources.
 
 Usage:
   manage-existing-stack.sh [--start] [options]
+  manage-existing-stack.sh --start-resources-only [options]
+  manage-existing-stack.sh --create-session-only [options]
   manage-existing-stack.sh --stop-all [options]
 
 Actions:
   --start                       Start resources and create a session (default).
+  --start-resources-only        Start Compute and ADB and wait until ready;
+                                do not check the plugin or create a session.
+  --create-session-only         Create/wait for the Bastion session; resources
+                                and the Bastion plugin must already be ready.
   --stop-all                    Close all Bastion sessions, stop ADB and Compute.
   --force-stop                  Use Compute STOP instead of graceful SOFTSTOP.
   --connect                     Open interactive SSH after creating the session.
@@ -86,6 +92,8 @@ require_value() {
 while (( $# > 0 )); do
   case "$1" in
     --start) action="start"; shift ;;
+    --start-resources-only) action="start-resources-only"; shift ;;
+    --create-session-only) action="create-session-only"; shift ;;
     --stop-all) action="stop-all"; shift ;;
     --force-stop) force_stop=true; shift ;;
     --connect) connect_after_start=true; shift ;;
@@ -137,7 +145,7 @@ if [[ "$action" == "stop-all" && "$connect_after_start" == "true" ]]; then
   echo "--connect cannot be combined with --stop-all." >&2
   exit 2
 fi
-if [[ "$action" == "start" && "$force_stop" == "true" ]]; then
+if [[ "$action" != "stop-all" && "$force_stop" == "true" ]]; then
   echo "--force-stop is valid only with --stop-all." >&2
   exit 2
 fi
@@ -225,7 +233,7 @@ autonomous_database_id="${autonomous_database_id:-$(tf_output_optional autonomou
 bastion_id="${bastion_id:-$(tf_output_optional bastion_id)}"
 region="${region:-$(tf_output_optional region)}"
 
-if [[ "$action" == "start" ]]; then
+if [[ "$action" == "start" || "$action" == "create-session-only" ]]; then
   private_ip="${private_ip:-$(tf_output_optional private_ip)}"
   ssh_public_key="${ssh_public_key:-$(tf_output_optional bastion_session_public_key_path)}"
   if [[ -z "$ssh_private_key" && "$ssh_public_key" == *.pub ]]; then
@@ -234,12 +242,16 @@ if [[ "$action" == "start" ]]; then
 fi
 
 [[ "$instance_id" == ocid1.instance.* ]] || fail "A valid Compute instance OCID is required. Use --instance-id or apply Terraform first."
-[[ "$autonomous_database_id" == ocid1.autonomousdatabase.* ]] || fail "A valid Autonomous Database OCID is required. Use --autonomous-database-id or apply Terraform first."
-[[ "$bastion_id" == ocid1.bastion.* ]] || fail "A valid Bastion OCID is required. Use --bastion-id or apply Terraform first."
+if [[ "$action" != "create-session-only" ]]; then
+  [[ "$autonomous_database_id" == ocid1.autonomousdatabase.* ]] || fail "A valid Autonomous Database OCID is required. Use --autonomous-database-id or apply Terraform first."
+fi
+if [[ "$action" != "start-resources-only" ]]; then
+  [[ "$bastion_id" == ocid1.bastion.* ]] || fail "A valid Bastion OCID is required. Use --bastion-id or apply Terraform first."
+fi
 [[ "$region" =~ ^[a-z]{2}-[a-z0-9-]+-[0-9]+$ ]] || fail "A valid OCI region is required. Use --region or a Terraform region output."
 command -v "$oci_bin" >/dev/null 2>&1 || fail "OCI CLI executable not found: $oci_bin"
 
-if [[ "$action" == "start" ]]; then
+if [[ "$action" == "start" || "$action" == "create-session-only" ]]; then
   [[ "$private_ip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || fail "A target private IPv4 address is required. Use --private-ip or a Terraform private_ip output."
   [[ -r "$ssh_public_key" ]] || fail "The Bastion SSH public key is not readable: ${ssh_public_key:-not resolved}"
 fi
@@ -382,7 +394,7 @@ run_mutation() {
   fi
 }
 
-start_resources() {
+request_resource_starts() {
   local compute_state adb_state
   get_compute_state compute_state
   get_adb_state adb_state
@@ -416,6 +428,25 @@ start_resources() {
   esac
 
   if [[ "$dry_run" == "true" ]]; then
+    return 0
+  fi
+}
+
+start_resources_only() {
+  request_resource_starts
+  if [[ "$dry_run" == "true" ]]; then
+    echo "Dry run: would wait for Compute RUNNING and Autonomous Database AVAILABLE."
+    echo "Dry run complete; no OCI resource was changed."
+    return 0
+  fi
+
+  wait_for_resource_state "compute" "$instance_id" "RUNNING" get_compute_state
+  wait_for_resource_state "autonomous_database" "$autonomous_database_id" "AVAILABLE" get_adb_state
+}
+
+start_resources() {
+  request_resource_starts
+  if [[ "$dry_run" == "true" ]]; then
     record_event "oracle_cloud_agent_plugin" "$instance_id" "wait" "CURRENT" "RUNNING" "PLANNED" "Would poll the Bastion plugin and print each iteration before creating a session."
     echo "Dry run: would wait for the Bastion plugin to reach RUNNING before creating a session."
     record_event "bastion_session" "$bastion_id" "create" "NOT_CREATED" "ACTIVE" "PLANNED" "Would create a managed SSH session after both resources become ready."
@@ -426,6 +457,15 @@ start_resources() {
   wait_for_resource_state "compute" "$instance_id" "RUNNING" get_compute_state
   wait_for_bastion_plugin_running
   wait_for_resource_state "autonomous_database" "$autonomous_database_id" "AVAILABLE" get_adb_state
+  create_bastion_session
+}
+
+create_session_only() {
+  if [[ "$dry_run" == "true" ]]; then
+    record_event "bastion_session" "$bastion_id" "create" "NOT_CREATED" "ACTIVE" "PLANNED" "Would create a managed SSH session after the external readiness gate succeeds."
+    echo "Dry run: would create a Bastion session and open SSH after readiness checks."
+    return 0
+  fi
   create_bastion_session
 }
 
@@ -657,16 +697,17 @@ stop_resources() {
 
 echo "Lifecycle action: $action"
 echo "Compute: $instance_id"
-echo "Autonomous Database: $autonomous_database_id"
-echo "Bastion: $bastion_id"
+echo "Autonomous Database: ${autonomous_database_id:-not required for this stage}"
+echo "Bastion: ${bastion_id:-not required for this stage}"
 echo "Region: $region"
 echo "Dry run: $dry_run"
 
-if [[ "$action" == "start" ]]; then
-  start_resources
-else
-  stop_resources
-fi
+case "$action" in
+  start) start_resources ;;
+  start-resources-only) start_resources_only ;;
+  create-session-only) create_session_only ;;
+  stop-all) stop_resources ;;
+esac
 
 record_event "run" "$run_id" "complete" "IN_PROGRESS" "COMPLETE" "SUCCEEDED" "Lifecycle execution completed."
 report_complete=true

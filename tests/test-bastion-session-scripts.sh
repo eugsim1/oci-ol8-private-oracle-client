@@ -69,9 +69,19 @@ lifecycle_log="$test_dir/lifecycle.log"
 cat > "$lifecycle_script" <<'MOCK_LIFECYCLE'
 #!/usr/bin/env bash
 set -Eeuo pipefail
-printf '%s\n' "$@" > "${MOCK_LIFECYCLE_LOG:?}"
+printf '%s\n' 'CALL' >> "${MOCK_LIFECYCLE_LOG:?}"
+printf '%s\n' "$@" >> "${MOCK_LIFECYCLE_LOG:?}"
 MOCK_LIFECYCLE
 chmod +x "$lifecycle_script"
+
+plugin_waiter="$test_dir/wait-for-bastion-plugin"
+plugin_waiter_log="$test_dir/plugin-waiter.log"
+cat > "$plugin_waiter" <<'MOCK_PLUGIN_WAITER'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+printf '%s\n' "$@" >> "${MOCK_PLUGIN_WAITER_LOG:?}"
+MOCK_PLUGIN_WAITER
+chmod +x "$plugin_waiter"
 
 export MOCK_TERRAFORM_LOG="$terraform_log"
 export MOCK_PUBLIC_KEY="$public_key"
@@ -79,6 +89,7 @@ export MOCK_SESSION_STATE_FILE="$session_state_file"
 export MOCK_SESSION_ID_FILE="$session_id_file"
 export MOCK_WORKSPACE_LOG="$workspace_log"
 export MOCK_LIFECYCLE_LOG="$lifecycle_log"
+export MOCK_PLUGIN_WAITER_LOG="$plugin_waiter_log"
 
 tfvars_file="$test_dir/terraform.tfvars"
 printf '%s\n' 'compartment_id = "ocid1.compartment.oc1..test"' > "$tfvars_file"
@@ -106,9 +117,11 @@ grep -Fqx "$tfvars_file" "$workspace_log"
 [[ "$(<"$session_id_file")" == 'ocid1.bastionsession.oc1.eu-frankfurt-1.testnew' ]]
 
 : > "$lifecycle_log"
+: > "$plugin_waiter_log"
 TERRAFORM_BIN="$mock_terraform" \
 WORKSPACE_SELECTOR_BIN="$workspace_selector" \
 LIFECYCLE_SCRIPT_BIN="$lifecycle_script" \
+BASTION_PLUGIN_WAITER_BIN="$plugin_waiter" \
 "$project_dir/scripts/start-and-connect.sh" \
   --tfvars "$tfvars_file" \
   --profile TESTPROFILE \
@@ -116,30 +129,35 @@ LIFECYCLE_SCRIPT_BIN="$lifecycle_script" \
   --poll-seconds 2 \
   --report-dir "$test_dir/reports"
 
-grep -Fqx -- '--start' "$lifecycle_log"
+[[ "$(grep -Fxc 'CALL' "$lifecycle_log")" == '2' ]]
+grep -Fqx -- '--start-resources-only' "$lifecycle_log"
+grep -Fqx -- '--create-session-only' "$lifecycle_log"
 grep -Fqx -- '--connect' "$lifecycle_log"
 grep -Fqx -- '--ssh-private-key' "$lifecycle_log"
 grep -Fqx "$private_key" "$lifecycle_log"
 grep -Fqx -- '--ssh-public-key' "$lifecycle_log"
 grep -Fqx "$public_key" "$lifecycle_log"
 grep -Fqx 'TESTPROFILE' "$lifecycle_log"
-grep -Fqx -- '--bastion-plugin-wait-seconds' "$lifecycle_log"
-grep -Fqx '600' "$lifecycle_log"
+grep -Fqx -- '--wait-seconds' "$plugin_waiter_log"
+grep -Fqx '900' "$plugin_waiter_log"
 if grep -Fqx -- '--dry-run' "$lifecycle_log"; then
   echo 'start-and-connect unexpectedly forwarded --dry-run.' >&2
   exit 1
 fi
 
 : > "$lifecycle_log"
+: > "$plugin_waiter_log"
 TERRAFORM_BIN="$mock_terraform" \
 WORKSPACE_SELECTOR_BIN="$workspace_selector" \
 LIFECYCLE_SCRIPT_BIN="$lifecycle_script" \
+BASTION_PLUGIN_WAITER_BIN="$plugin_waiter" \
 "$project_dir/scripts/start-and-connect.sh" \
   --tfvars "$tfvars_file" \
   --ssh-private-key "$private_key" \
   --dry-run
 
 grep -Fqx -- '--dry-run' "$lifecycle_log"
+grep -Fqx -- '--dry-run' "$plugin_waiter_log"
 if grep -Fqx -- '--connect' "$lifecycle_log"; then
   echo 'Dry-run mode must not open SSH.' >&2
   exit 1
@@ -157,9 +175,11 @@ printf 'SSH_PRIVATE_KEY=%q\n' "$cached_private_key" > "$connection_file"
 rm -f -- "$private_key"
 
 : > "$lifecycle_log"
+: > "$plugin_waiter_log"
 TERRAFORM_BIN="$mock_terraform" \
 WORKSPACE_SELECTOR_BIN="$workspace_selector" \
 LIFECYCLE_SCRIPT_BIN="$lifecycle_script" \
+BASTION_PLUGIN_WAITER_BIN="$plugin_waiter" \
 "$project_dir/scripts/start-and-connect.sh" \
   --tfvars "$tfvars_file" \
   --connection-file "$connection_file" \
@@ -178,9 +198,11 @@ inventory_file="$test_dir/hosts.yml"
 printf '    ansible_ssh_private_key_file: "%s"\n' "$inventory_private_key" > "$inventory_file"
 
 : > "$lifecycle_log"
+: > "$plugin_waiter_log"
 TERRAFORM_BIN="$mock_terraform" \
 WORKSPACE_SELECTOR_BIN="$workspace_selector" \
 LIFECYCLE_SCRIPT_BIN="$lifecycle_script" \
+BASTION_PLUGIN_WAITER_BIN="$plugin_waiter" \
 "$project_dir/scripts/start-and-connect.sh" \
   --tfvars "$tfvars_file" \
   --connection-file "$test_dir/not-present.env" \
@@ -197,9 +219,11 @@ printf '%s\n' 'ssh-ed25519 AAAATESTONLYEXPLICIT bastion-explicit-test' > "$expli
 chmod 600 "$explicit_private_key"
 
 : > "$lifecycle_log"
+: > "$plugin_waiter_log"
 TERRAFORM_BIN="$mock_terraform" \
 WORKSPACE_SELECTOR_BIN="$workspace_selector" \
 LIFECYCLE_SCRIPT_BIN="$lifecycle_script" \
+BASTION_PLUGIN_WAITER_BIN="$plugin_waiter" \
 "$project_dir/scripts/start-and-connect.sh" \
   --tfvars "$tfvars_file" \
   --ssh-private-key "$explicit_private_key" \
@@ -244,6 +268,7 @@ grep -Fqx -- '--force-stop' "$lifecycle_log"
 
 "$project_dir/scripts/renew-bastion-session.sh" --help >/dev/null
 "$project_dir/scripts/start-and-connect.sh" --help >/dev/null
+"$project_dir/scripts/wait-for-bastion-plugin.sh" --help >/dev/null
 "$project_dir/scripts/stop-all.sh" --help >/dev/null
 
 echo 'PASS: session renewal and artifact-driven start/connect/stop wrappers'

@@ -9,6 +9,7 @@ inventory_file="$root_dir/ansible/inventory/hosts.yml"
 terraform_bin="${TERRAFORM_BIN:-terraform}"
 workspace_selector="${WORKSPACE_SELECTOR_BIN:-$root_dir/scripts/select-compartment-workspace.sh}"
 lifecycle_script="${LIFECYCLE_SCRIPT_BIN:-$root_dir/scripts/manage-existing-stack.sh}"
+plugin_waiter="${BASTION_PLUGIN_WAITER_BIN:-$root_dir/scripts/wait-for-bastion-plugin.sh}"
 
 ssh_private_key="${SSH_PRIVATE_KEY_PATH:-}"
 ssh_public_key="${SSH_PUBLIC_KEY_PATH:-}"
@@ -19,7 +20,7 @@ target_port=22
 session_ttl=10800
 wait_seconds=3600
 poll_seconds=10
-bastion_plugin_wait_seconds=600
+bastion_plugin_wait_seconds=900
 report_dir="$root_dir/reports"
 dry_run=false
 skip_workspace_selection=false
@@ -51,7 +52,7 @@ OCI and connection options:
   --wait-seconds SECONDS        lifecycle timeout; default 3600
   --poll-seconds SECONDS        polling interval; default 10
   --bastion-plugin-wait-seconds SECONDS
-                                Bastion plugin timeout; default 600
+                                Bastion plugin timeout; default 900
   --report-dir PATH             timestamped CSV directory; default PROJECT/reports
   --dry-run                     inspect and report only; do not start or connect
   -h, --help
@@ -102,6 +103,7 @@ done
 
 command -v "$terraform_bin" >/dev/null || { echo "terraform is required: $terraform_bin" >&2; exit 1; }
 [[ -x "$lifecycle_script" ]] || { echo "Lifecycle script is not executable: $lifecycle_script" >&2; exit 1; }
+[[ -x "$plugin_waiter" ]] || { echo "Bastion plugin waiter is not executable: $plugin_waiter" >&2; exit 1; }
 
 if [[ "$skip_workspace_selection" != "true" ]]; then
   [[ -x "$workspace_selector" ]] || { echo "Workspace selector is not executable: $workspace_selector" >&2; exit 1; }
@@ -189,35 +191,52 @@ fi
   exit 1
 }
 
-lifecycle_args=(
-  --start
+common_lifecycle_args=(
   --terraform-dir "$terraform_dir"
+  --profile "$profile"
+  --wait-seconds "$wait_seconds"
+  --poll-seconds "$poll_seconds"
+  --report-dir "$report_dir"
+)
+[[ -n "$auth_mode" ]] && common_lifecycle_args+=(--auth "$auth_mode")
+
+resource_args=(--start-resources-only "${common_lifecycle_args[@]}")
+plugin_args=(
+  --terraform-dir "$terraform_dir"
+  --profile "$profile"
+  --wait-seconds "$bastion_plugin_wait_seconds"
+  --poll-seconds "$poll_seconds"
+)
+[[ -n "$auth_mode" ]] && plugin_args+=(--auth "$auth_mode")
+session_args=(
+  --create-session-only
+  "${common_lifecycle_args[@]}"
   --ssh-public-key "$ssh_public_key"
   --ssh-private-key "$ssh_private_key"
-  --profile "$profile"
   --os-user "$target_os_user"
   --target-port "$target_port"
   --session-ttl "$session_ttl"
-  --wait-seconds "$wait_seconds"
-  --poll-seconds "$poll_seconds"
-  --bastion-plugin-wait-seconds "$bastion_plugin_wait_seconds"
-  --report-dir "$report_dir"
 )
-[[ -n "$auth_mode" ]] && lifecycle_args+=(--auth "$auth_mode")
 if [[ "$dry_run" == "true" ]]; then
-  lifecycle_args+=(--dry-run)
+  resource_args+=(--dry-run)
+  plugin_args+=(--dry-run)
+  session_args+=(--dry-run)
   echo "Dry run: resource state will be inspected, but no resource will be started and SSH will not open."
 else
-  lifecycle_args+=(--connect)
+  session_args+=(--connect)
 fi
 
 echo "Terraform directory: $terraform_dir"
 echo "SSH private key: $ssh_private_key"
 echo "SSH public key: $ssh_public_key"
-if [[ "$dry_run" == "true" ]]; then
-  echo "Inspecting the resources and planned Bastion/SSH workflow as $target_os_user."
-else
-  echo "Starting stopped resources, creating a fresh Bastion session, and opening SSH as $target_os_user."
-fi
+echo
+echo "Stage 1/3: start Compute and Autonomous Database, then wait for stable running states."
+"$lifecycle_script" "${resource_args[@]}"
 
-exec "$lifecycle_script" "${lifecycle_args[@]}"
+echo
+echo "Stage 2/3: wait for the Compute Bastion plugin to report RUNNING."
+"$plugin_waiter" "${plugin_args[@]}"
+
+echo
+echo "Stage 3/3: create a fresh Bastion session, wait for ACTIVE, and connect as $target_os_user."
+"$lifecycle_script" "${session_args[@]}"

@@ -2,6 +2,22 @@
 
 All notable operational changes to this project are documented here.
 
+## 1.9.0 - 2026-08-12
+
+- Reworked `start-and-connect.sh` as three visible stages: start/wait for
+  Compute and Autonomous Database, wait for the Bastion plugin, then create the
+  Bastion session and open SSH.
+- Added standalone `scripts/wait-for-bastion-plugin.sh`. It prints every poll,
+  treats missing plugin inventory and transient OCI CLI/API failures as
+  retryable, and continues until `RUNNING` or the configured timeout.
+- Increased the modular wrapper's default plugin readiness timeout from 600 to
+  900 seconds; `--bastion-plugin-wait-seconds` still overrides it.
+- Added `--start-resources-only` and `--create-session-only` lifecycle modes so
+  the staged wrapper reuses focused operations while preserving the original
+  `manage-existing-stack.sh --start` behavior.
+- Added offline readiness-gate and staged-wrapper tests plus Linux CI and
+  operator-runbook coverage.
+
 ## 1.8.1 - 2026-08-11
 
 - Documented that `output_assets.txt` is input to

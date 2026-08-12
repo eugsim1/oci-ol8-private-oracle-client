@@ -10,7 +10,8 @@ external Linux controller with the repository checkout and Terraform state.
 |---|---|---:|---:|---:|---:|
 | First deployment | `deploy.sh` | Terraform-managed | Yes | Yes | No |
 | Start stopped services and log in | `start-and-connect.sh` | Yes, if stopped | Fresh session | No | Yes |
-| Stop all services | `stop-all.sh` | Stops both | Closes all | No | No |
+| Wait only for Bastion plugin readiness | `wait-for-bastion-plugin.sh` | No | No | No | No |
+| Stop ADB and Compute | `stop-all.sh` | Stops both | Deletes open sessions | No | No |
 | Renew only the Terraform session | `renew-bastion-session.sh` | No | Replaces session | No | No |
 | Full lifecycle control or automation | `manage-existing-stack.sh` | Optional | Optional | No | Optional |
 | Connect through the current active session | `connect-oracle-server.sh` | No | No | No | Yes |
@@ -62,20 +63,21 @@ be stopped:
 ./scripts/start-and-connect.sh --tfvars terraform.tfvars
 ```
 
-The workflow:
+The wrapper is deliberately split into three independently visible stages:
 
 1. Selects the Terraform workspace derived from `compartment_id`.
 2. Resolves the existing key pair from deployment artifacts.
 3. Reads existing resource OCIDs, private IP, and region from Terraform.
-4. Starts Compute only when it is `STOPPED`.
-5. Starts Autonomous Database only when it is `STOPPED`.
-6. Waits for Compute to reach `RUNNING`.
-7. Polls the Compute instance's `Bastion` plugin until it reaches `RUNNING`,
-   printing each numbered check to the console.
-8. Waits for ADB to reach `AVAILABLE`.
-9. Creates a fresh managed SSH session and waits for `ACTIVE`.
-10. Opens interactive SSH to `oracle@<private-ip>` through OCI Bastion.
-11. Writes the lifecycle events to `reports/stack-lifecycle-*.csv`.
+4. Stage 1 starts Compute/ADB only when `STOPPED`, then waits for Compute
+   `RUNNING` and ADB `AVAILABLE`.
+5. Stage 2 invokes `wait-for-bastion-plugin.sh`, which prints numbered checks
+   until the Compute `Bastion` plugin reaches `RUNNING`.
+6. Missing plugin inventory and transient OCI CLI/API failures are retried
+   until the plugin timeout instead of aborting the workflow immediately.
+7. Stage 3 creates a fresh managed SSH session and waits for `ACTIVE`.
+8. Opens interactive SSH to `oracle@<private-ip>` through OCI Bastion.
+9. Writes separate resource-start and session-creation audit CSVs to
+   `reports/stack-lifecycle-*.csv`.
 
 No Ansible playbook runs. Preview all OCI mutations first:
 
@@ -95,7 +97,7 @@ Use an explicit key or OCI authentication mode when required:
   --profile DEFAULT \
   --session-ttl 10800 \
   --wait-seconds 3600 \
-  --bastion-plugin-wait-seconds 600 \
+  --bastion-plugin-wait-seconds 900 \
   --poll-seconds 10
 ```
 
@@ -114,19 +116,38 @@ cached/inventory private key with an unrelated Terraform public-key artifact.
 Run `./scripts/start-and-connect.sh --help` for all artifact, workspace, OCI,
 SSH, timeout, dry-run, and report flags.
 
+Run the readiness gate separately for diagnosis or automation:
+
+```bash
+./scripts/wait-for-bastion-plugin.sh \
+  --terraform-dir ./terraform \
+  --profile DEFAULT \
+  --wait-seconds 900 \
+  --poll-seconds 10
+```
+
+It resolves `instance_id` and `region` from Terraform when omitted. Use
+`--instance-id` and `--region` when running without the Terraform state.
+
 ## 3. Stop Autonomous Database and Compute
 
-Run the focused stop wrapper from the external Linux controller:
+Run this from the external controller, not from the Compute instance being
+stopped. Preview the selected resources and operations first:
 
 ```bash
 ./scripts/stop-all.sh --tfvars terraform.tfvars --dry-run
+```
+
+Then close every non-deleted session for the selected Bastion, stop Autonomous
+Database, gracefully stop Compute with `SOFTSTOP`, and wait for both resources
+to reach `STOPPED`:
+
+```bash
 ./scripts/stop-all.sh --tfvars terraform.tfvars
 ```
 
-It selects the compartment-safe Terraform workspace, closes all non-deleted
-sessions for the selected Bastion, stops Autonomous Database, and gracefully
-stops Compute. Use `--force-stop` only for an approved hard power-off. Do not
-run this command from the Compute node that it will stop.
+Use `--force-stop` only for an approved emergency hard power-off. Every run
+writes a timestamped lifecycle CSV under `reports/`.
 
 ## 4. Renew only the Terraform-managed Bastion session
 
@@ -176,6 +197,8 @@ explicit test/imported OCIDs as well as Terraform outputs.
 ./scripts/manage-existing-stack.sh --dry-run
 ./scripts/manage-existing-stack.sh --start
 ./scripts/manage-existing-stack.sh --start --connect
+./scripts/manage-existing-stack.sh --start-resources-only
+./scripts/manage-existing-stack.sh --create-session-only
 ./scripts/manage-existing-stack.sh --stop-all --dry-run
 ./scripts/manage-existing-stack.sh --stop-all
 ```
@@ -353,6 +376,7 @@ Offline tests use test OCIDs and mock executables; they do not contact OCI:
 
 ```bash
 ./tests/test-manage-existing-stack.sh
+./tests/test-wait-for-bastion-plugin.sh
 ./tests/test-bastion-session-scripts.sh
 ./tests/test-generate-output-assets.sh
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tests\test-connect-streamlit-from-terraform.ps1
@@ -373,7 +397,7 @@ shellcheck scripts/*.sh tests/*.sh
 | A path from a copied Linux inventory is missing on Windows | Replace the SSH key, API key, OCI config, and connector paths with their Windows equivalents. |
 | Private key cannot be resolved | Pass `--ssh-private-key`; confirm the matching `.pub` file exists. |
 | Compute remains `STOPPED` | Check OCI CLI identity, instance state, and `manage instance-family` permission. |
-| Bastion plugin never reaches `RUNNING` | Check Oracle Cloud Agent and its Bastion plugin on the Compute node; increase `--bastion-plugin-wait-seconds` if startup legitimately needs longer. |
+| Bastion plugin never reaches `RUNNING` | Run `wait-for-bastion-plugin.sh` directly to see every state/query error; check Oracle Cloud Agent and increase `--bastion-plugin-wait-seconds` if startup legitimately needs longer. |
 | ADB remains `STOPPED` | Check database state and `manage autonomous-database-family` permission. |
 | Session creation fails | Confirm Bastion target subnet, agent/plugin status, public key, NSGs, and session IAM. |
 | SSH times out after `ACTIVE` | Check private IP, port 22 NSG rules, `sshd`, target username, and matching key. |

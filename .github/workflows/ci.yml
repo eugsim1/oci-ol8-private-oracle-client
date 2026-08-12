@@ -20,6 +20,9 @@ jobs:
       - name: Test lifecycle engine
         run: ./tests/test-manage-existing-stack.sh
 
+      - name: Test Bastion plugin readiness gate
+        run: ./tests/test-wait-for-bastion-plugin.sh
+
       - name: Test Bastion session wrappers
         run: ./tests/test-bastion-session-scripts.sh
 

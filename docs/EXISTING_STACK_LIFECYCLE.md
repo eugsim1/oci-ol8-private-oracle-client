@@ -11,9 +11,10 @@ the v1.4.0 wrapper:
 ./scripts/start-and-connect.sh --tfvars terraform.tfvars
 ```
 
-It selects the compartment workspace, resolves the key artifacts, and delegates
-the start/wait/session/connect operations documented below to this lifecycle
-engine. It never runs Ansible. Use `manage-existing-stack.sh` directly for
+It selects the compartment workspace, resolves the key artifacts, and runs
+three focused stages: `--start-resources-only`, the standalone
+`wait-for-bastion-plugin.sh` readiness gate, and `--create-session-only` with
+SSH. It never runs Ansible. Use `manage-existing-stack.sh` directly for
 explicit OCIDs, automation without an interactive login, or `--stop-all`.
 
 The default `--start` workflow is:
@@ -22,11 +23,11 @@ The default `--start` workflow is:
    private IP, and Bastion session public key from the current Terraform state.
 2. Inspect both lifecycle states.
 3. Send Compute `START` and Autonomous Database `start` only when stopped.
-4. Wait for Compute `RUNNING`.
+4. Wait for Compute `RUNNING` and Autonomous Database `AVAILABLE`.
 5. Poll the Compute Instance Agent and print each numbered iteration until its
    `Bastion` plugin reaches `RUNNING`.
-6. Wait for Autonomous Database `AVAILABLE`. OCI calls the running/ready
-   Autonomous Database state `AVAILABLE`, not `RUNNING`.
+   The standalone waiter retries missing inventory and transient OCI CLI/API
+   failures until its timeout.
 7. Create an OCI Bastion `MANAGED_SSH` session to `oracle@PRIVATE_IP:22` and wait
    for it to become `ACTIVE`.
 8. Print a usable OpenSSH command. `--connect` also opens the interactive login.
@@ -111,7 +112,8 @@ uses the resources' compartments.
 ## 4. Make the scripts executable and run a dry run
 
 ```bash
-chmod +x scripts/manage-existing-stack.sh tests/test-manage-existing-stack.sh
+chmod +x scripts/manage-existing-stack.sh scripts/wait-for-bastion-plugin.sh \
+  tests/test-manage-existing-stack.sh tests/test-wait-for-bastion-plugin.sh
 
 ./scripts/manage-existing-stack.sh --dry-run
 ```
@@ -179,13 +181,13 @@ For a controller using an instance principal:
 First preview the shutdown:
 
 ```bash
-./scripts/stop-all.sh --tfvars terraform.tfvars --dry-run
+./scripts/manage-existing-stack.sh --stop-all --dry-run
 ```
 
 Then perform it:
 
 ```bash
-./scripts/stop-all.sh --tfvars terraform.tfvars
+./scripts/manage-existing-stack.sh --stop-all
 ```
 
 `--stop-all` means all non-deleted sessions returned for the selected Bastion,
@@ -195,7 +197,7 @@ shut down gracefully. During an approved emergency only, explicitly request
 hard power-off:
 
 ```bash
-./scripts/stop-all.sh --tfvars terraform.tfvars --force-stop
+./scripts/manage-existing-stack.sh --stop-all --force-stop
 ```
 
 If a resource is already in its desired state, the report records `NO_CHANGE`.
