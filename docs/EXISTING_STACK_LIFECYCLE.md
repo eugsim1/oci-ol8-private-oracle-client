@@ -26,8 +26,9 @@ The default `--start` workflow is:
 4. Wait for Compute `RUNNING` and Autonomous Database `AVAILABLE`.
 5. Poll the Compute Instance Agent and print each numbered iteration until its
    `Bastion` plugin reaches `RUNNING`.
-   The standalone waiter retries missing inventory and transient OCI CLI/API
-   failures until its timeout.
+   The standalone waiter retries missing inventory, transient OCI CLI/API
+   failures, and `INVALID` (status not yet recognizable by OCI) until its
+   timeout. `NOT_SUPPORTED` is terminal.
 7. Create an OCI Bastion `MANAGED_SSH` session to `oracle@PRIVATE_IP:22` and wait
    for it to become `ACTIVE`.
 8. Print a usable OpenSSH command. `--connect` also opens the interactive login.

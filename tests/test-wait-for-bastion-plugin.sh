@@ -39,7 +39,8 @@ case "${1:-} ${2:-} ${3:-}" in
     case "$calls" in
       1) printf 'None\n' ;;
       2) printf 'ServiceError: plugin inventory is temporarily unavailable\n' >&2; exit 1 ;;
-      3) printf 'STOPPED\n' ;;
+      3) printf 'INVALID\n' ;;
+      4) printf 'STOPPED\n' ;;
       *) printf 'RUNNING\n' ;;
     esac
     ;;
@@ -59,18 +60,20 @@ output="$(
     --instance-id ocid1.instance.oc1.eu-frankfurt-1.testcompute \
     --region eu-frankfurt-1 \
     --profile TESTPROFILE \
-    --wait-seconds 10 \
+    --wait-seconds 30 \
     --poll-seconds 1
 )"
 
 grep -Fq 'Bastion plugin check 1: status=QUERY_ERROR; retrying' <<< "$output"
 grep -Fq 'Bastion plugin check 2: status=NOT_REPORTED; expected=RUNNING' <<< "$output"
 grep -Fq 'Bastion plugin check 3: status=QUERY_ERROR; retrying' <<< "$output"
-grep -Fq 'Bastion plugin check 4: status=STOPPED; expected=RUNNING' <<< "$output"
-grep -Fq 'Bastion plugin check 5: status=RUNNING; expected=RUNNING' <<< "$output"
-grep -Fq 'Bastion plugin is RUNNING after 5 iteration(s).' <<< "$output"
+grep -Fq 'Bastion plugin check 4: status=INVALID; expected=RUNNING' <<< "$output"
+grep -Fq 'Bastion plugin status is not yet recognizable by OCI; retrying until RUNNING or timeout.' <<< "$output"
+grep -Fq 'Bastion plugin check 5: status=STOPPED; expected=RUNNING' <<< "$output"
+grep -Fq 'Bastion plugin check 6: status=RUNNING; expected=RUNNING' <<< "$output"
+grep -Fq 'Bastion plugin is RUNNING after 6 iteration(s).' <<< "$output"
 [[ "$(<"$state_dir/compute-calls")" == '2' ]]
-[[ "$(<"$state_dir/plugin-calls")" == '4' ]]
+[[ "$(<"$state_dir/plugin-calls")" == '5' ]]
 
 before_compute_calls="$(<"$state_dir/compute-calls")"
 dry_output="$(
@@ -82,4 +85,4 @@ dry_output="$(
 grep -Fq 'Dry run: would poll the Bastion plugin until status=RUNNING.' <<< "$dry_output"
 [[ "$(<"$state_dir/compute-calls")" == "$before_compute_calls" ]]
 
-echo 'PASS: Bastion plugin waiter retries transient OCI failures until RUNNING'
+echo 'PASS: Bastion plugin waiter retries transient OCI failures and INVALID status until RUNNING'

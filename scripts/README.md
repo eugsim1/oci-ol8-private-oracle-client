@@ -72,8 +72,9 @@ The wrapper is deliberately split into three independently visible stages:
    `RUNNING` and ADB `AVAILABLE`.
 5. Stage 2 invokes `wait-for-bastion-plugin.sh`, which prints numbered checks
    until the Compute `Bastion` plugin reaches `RUNNING`.
-6. Missing plugin inventory and transient OCI CLI/API failures are retried
-   until the plugin timeout instead of aborting the workflow immediately.
+6. Missing plugin inventory, transient OCI CLI/API failures, and `INVALID`
+   (status not yet recognizable by OCI) are retried until the plugin timeout.
+   `NOT_SUPPORTED` remains an immediate terminal error.
 7. Stage 3 creates a fresh managed SSH session and waits for `ACTIVE`.
 8. Opens interactive SSH to `oracle@<private-ip>` through OCI Bastion.
 9. Writes separate resource-start and session-creation audit CSVs to
@@ -397,7 +398,8 @@ shellcheck scripts/*.sh tests/*.sh
 | A path from a copied Linux inventory is missing on Windows | Replace the SSH key, API key, OCI config, and connector paths with their Windows equivalents. |
 | Private key cannot be resolved | Pass `--ssh-private-key`; confirm the matching `.pub` file exists. |
 | Compute remains `STOPPED` | Check OCI CLI identity, instance state, and `manage instance-family` permission. |
-| Bastion plugin never reaches `RUNNING` | Run `wait-for-bastion-plugin.sh` directly to see every state/query error; check Oracle Cloud Agent and increase `--bastion-plugin-wait-seconds` if startup legitimately needs longer. |
+| Bastion plugin reports `INVALID` | The waiter now keeps polling because OCI defines this as an unrecognized status; allow it to reach `RUNNING` or the timeout. |
+| Bastion plugin never reaches `RUNNING` | Run `wait-for-bastion-plugin.sh` directly to see every state/query error; check Oracle Cloud Agent and increase `--bastion-plugin-wait-seconds` if startup legitimately needs longer. `NOT_SUPPORTED` requires a compatible image/agent rather than more waiting. |
 | ADB remains `STOPPED` | Check database state and `manage autonomous-database-family` permission. |
 | Session creation fails | Confirm Bastion target subnet, agent/plugin status, public key, NSGs, and session IAM. |
 | SSH times out after `ACTIVE` | Check private IP, port 22 NSG rules, `sshd`, target username, and matching key. |

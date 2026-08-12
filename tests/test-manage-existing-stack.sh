@@ -97,7 +97,9 @@ case "${1:-} ${2:-} ${3:-}" in
     calls="$(<"$state_dir/plugin-calls")"
     calls=$((calls + 1))
     printf '%s\n' "$calls" > "$state_dir/plugin-calls"
-    if (( calls < 3 )); then
+    if (( calls == 1 )); then
+      printf 'INVALID\n'
+    elif (( calls < 3 )); then
       printf 'STOPPED\n'
     else
       printf 'RUNNING\n'
@@ -161,7 +163,8 @@ start_output="$("$script" \
 [[ "$(<"$mock_state_dir/compute")" == "RUNNING" ]]
 [[ "$(<"$mock_state_dir/adb")" == "AVAILABLE" ]]
 [[ "$(<"$mock_state_dir/plugin-calls")" == "3" ]]
-grep -Fq 'Bastion plugin check 1: status=STOPPED; expected=RUNNING' <<< "$start_output"
+grep -Fq 'Bastion plugin check 1: status=INVALID; expected=RUNNING' <<< "$start_output"
+grep -Fq 'Bastion plugin status is not yet recognizable by OCI; retrying until RUNNING or timeout.' <<< "$start_output"
 grep -Fq 'Bastion plugin check 3: status=RUNNING; expected=RUNNING' <<< "$start_output"
 grep -Fq 'Bastion plugin is RUNNING after 3 iteration(s).' <<< "$start_output"
 start_report="$(find "$mock_report_dir" -name 'stack-lifecycle-*.csv' -print | sort | sed -n '2p')"

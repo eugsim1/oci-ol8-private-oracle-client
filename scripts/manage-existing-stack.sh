@@ -374,8 +374,11 @@ wait_for_bastion_plugin_running() {
         echo "Bastion plugin is RUNNING after $iteration iteration(s)."
         return 0
         ;;
-      INVALID|NOT_SUPPORTED)
-        fail "Bastion plugin cannot become ready from status $status. Check the Oracle Cloud Agent configuration."
+      INVALID)
+        echo "Bastion plugin status is not yet recognizable by OCI; retrying until RUNNING or timeout."
+        ;;
+      NOT_SUPPORTED)
+        fail "Bastion plugin is not supported on this Compute platform. Check Oracle Cloud Agent and image compatibility."
         return 1
         ;;
     esac

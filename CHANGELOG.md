@@ -2,6 +2,17 @@
 
 All notable operational changes to this project are documented here.
 
+## 1.9.1 - 2026-08-12
+
+- Treat the Compute Instance Agent `Bastion` plugin status `INVALID` as a
+  retryable startup state instead of failing on the first check. OCI defines
+  `INVALID` as a status that the service does not recognize, so the readiness
+  gate now continues until `RUNNING` or the configured timeout.
+- Keep `NOT_SUPPORTED` as an immediate terminal error because it indicates the
+  plugin is unavailable on the Compute platform.
+- Extend the offline readiness test and operator documentation for the
+  `INVALID` transition.
+
 ## 1.9.0 - 2026-08-12
 
 - Reworked `start-and-connect.sh` as three visible stages: start/wait for

@@ -169,8 +169,11 @@ while (( SECONDS < deadline )); do
       echo "Bastion plugin is RUNNING after $iteration iteration(s)."
       exit 0
       ;;
-    INVALID|NOT_SUPPORTED)
-      echo "Bastion plugin cannot become ready from status $last_status. Check Oracle Cloud Agent configuration." >&2
+    INVALID)
+      echo "Bastion plugin status is not yet recognizable by OCI; retrying until RUNNING or timeout."
+      ;;
+    NOT_SUPPORTED)
+      echo "Bastion plugin is not supported on this Compute platform. Check Oracle Cloud Agent and image compatibility." >&2
       exit 1
       ;;
   esac

@@ -10,7 +10,7 @@ project, installs its Go and Oracle runtime dependencies, creates the target
 database schema, downloads the Autonomous Database wallet, and verifies the
 private database connection.
 
-**Current main-branch documentation version: `v1.9.0` (2026-08-12).**
+**Current main-branch documentation version: `v1.9.1` (2026-08-12).**
 
 The deployed utility reads OCI FOCUS cost-report objects from Object Storage,
 processes multiple gzip CSV files concurrently, enriches and normalizes the
@@ -527,8 +527,9 @@ artifact-driven workflow instead:
 It selects the compartment workspace, resolves the existing key artifacts, and
 runs three modular stages. First it starts only stopped resources and waits for
 Compute `RUNNING` plus ADB `AVAILABLE`. Next the standalone plugin waiter prints
-numbered polling iterations and retries transient OCI errors until the Compute
-instance's `Bastion` plugin is `RUNNING`. Finally it creates a fresh Bastion
+numbered polling iterations and retries transient OCI errors and the OCI
+`INVALID` startup status until the Compute instance's `Bastion` plugin is
+`RUNNING`. Finally it creates a fresh Bastion
 session, writes lifecycle CSVs, and opens SSH. It does not run Ansible. See
 [`scripts/README.md`](scripts/README.md) for the decision table and
 documentation for every script.
@@ -567,9 +568,10 @@ The modular wrapper sends both start requests and waits for Compute `RUNNING`
 and Autonomous Database `AVAILABLE`. It then invokes
 `scripts/wait-for-bastion-plugin.sh`, which queries the OCI Compute Instance
 Agent once per polling interval. Each console iteration shows the current
-`Bastion` plugin state; not-yet-reported inventory and transient OCI/API errors
-are retried until the timeout. Session creation cannot begin until the plugin
-is `RUNNING`. The final stage creates a fresh managed SSH session and waits for
+`Bastion` plugin state; not-yet-reported inventory, transient OCI/API errors,
+and `INVALID` (status not yet recognizable by OCI) are retried until the
+timeout. `NOT_SUPPORTED` remains terminal. Session creation cannot begin until
+the plugin is `RUNNING`. The final stage creates a fresh managed SSH session and waits for
 `ACTIVE`. `AVAILABLE` is OCI's running/ready lifecycle state for Autonomous
 Database.
 
